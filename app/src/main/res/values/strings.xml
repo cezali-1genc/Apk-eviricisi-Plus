@@ -1,0 +1,20 @@
+<resources>
+    <string name="app_name">Apk Çeviricisi Plus</string>
+    <string name="brand_name">CEZALI 1GENÇ</string>
+    <string name="brand_subtitle">Dijital Teknoloji • Yazılım • Android • Proje Geliştirme</string>
+    <string name="brand_owner">Serhat Güner</string>
+    <string name="nav_workspace">Çalışma Alanı</string>
+    <string name="nav_tools">APK Araçları</string>
+    <string name="nav_preview">Önizleme</string>
+    <string name="nav_models">Modeller</string>
+    <string name="nav_settings">Ayarlar</string>
+    <string name="action_select_apk">APK Dosyası Seç</string>
+    <string name="action_select_output_folder">Çıktı Klasörü Seç</string>
+    <string name="action_start_translation">Çevir ve APK Oluştur</string>
+    <string name="action_install_apk">APK Yükle</string>
+    <string name="action_share_apk">APK Paylaş</string>
+    <string name="action_save_as">Farklı Kaydet</string>
+    <string name="signing_warning_notice">Not: Yeniden oluşturulan APK, yeni bir imza anahtarıyla (v1/v2/v3) imzalanır. Orijinal geliştirici imzası korunamaz; imza veya Google Play Lisans doğrulaması yapan uygulamalarda uyumsuzluk yaşanabilir.</string>
+    <string name="online_consent_title">Çevrimiçi Çeviri Veri Aktarımı Onayı</string>
+    <string name="online_consent_message">Seçilen APK içerisindeki metin kaynakları, yapılandırdığınız çevrimiçi çeviri API adresine gönderilecektir. Onayınız olmadan hiçbir dosya veya metin dışarı aktarılmaz. Devam etmek istiyor musunuz?</string>
+</resources>

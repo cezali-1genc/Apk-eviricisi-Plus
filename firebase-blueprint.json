@@ -1,0 +1,137 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user profile and translation preferences stored privately per user.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the profile owner."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name shown in the signed-in banner."
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address from Google Sign-In (owner-only PII)."
+        },
+        "preferredTargetLang": {
+          "type": "string",
+          "description": "Preferred target language code (e.g. tr, en, de)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp written with FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp written with FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "displayName", "createdAt"]
+    },
+    "ApkProject": {
+      "title": "ApkProject",
+      "description": "Cloud-synced APK inspection, AI security summary, and translation build record.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the project owner."
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Selected APK file name."
+        },
+        "packageName": {
+          "type": "string",
+          "description": "Android package name parsed from AndroidManifest.xml."
+        },
+        "appLabel": {
+          "type": "string",
+          "description": "Resolved application label."
+        },
+        "versionName": {
+          "type": "string",
+          "description": "APK versionName."
+        },
+        "inputSha256": {
+          "type": "string",
+          "description": "64-character SHA-256 hex digest of the unmodified input APK."
+        },
+        "outputSha256": {
+          "type": "string",
+          "description": "64-character SHA-256 hex digest of the signed output APK."
+        },
+        "sourceLang": {
+          "type": "string",
+          "description": "Detected or selected source language code."
+        },
+        "targetLang": {
+          "type": "string",
+          "description": "Target language code."
+        },
+        "translationEngine": {
+          "type": "string",
+          "enum": ["AUTO", "OFFLINE_ONLY", "ONLINE_ONLY", "GEMINI_AI"],
+          "description": "Translation engine mode used for this project."
+        },
+        "translatedCount": {
+          "type": "integer",
+          "description": "Count of translated resource entries."
+        },
+        "aiSecuritySummary": {
+          "type": "string",
+          "description": "Gemini AI-generated APK security and resource analysis summary."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["inspected", "translated", "signed"],
+          "description": "Lifecycle state of the APK project."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp written with FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp written with FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "fileName",
+        "packageName",
+        "appLabel",
+        "versionName",
+        "inputSha256",
+        "sourceLang",
+        "targetLang",
+        "translationEngine",
+        "translatedCount",
+        "status",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "Owner-only user profile document."
+    },
+    "/users/{userId}/apk_projects/{projectId}": {
+      "schema": {
+        "$ref": "#/entities/ApkProject"
+      },
+      "description": "Owner-scoped APK inspection, Gemini analysis, and translation project records."
+    }
+  }
+}

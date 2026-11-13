@@ -1,0 +1,6 @@
+{
+  "name": "Apk Çeviricisi Plus",
+  "description": "Android APK resource extractor, full APK toolkit, Gemini AI & ML Kit translator, binary resources.arsc rebuilder, cloud sync, and v1/v2/v3 APK signer by Cezali 1Genc.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

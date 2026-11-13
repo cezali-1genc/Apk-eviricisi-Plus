@@ -1,0 +1,143 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: default deny everything unless explicitly matched below
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidUserProfile(data) {
+      return data.userId is string &&
+             data.userId == request.auth.uid &&
+             data.userId.size() >= 1 &&
+             data.userId.size() <= 128 &&
+             data.displayName is string &&
+             data.displayName.size() >= 1 &&
+             data.displayName.size() <= 80 &&
+             (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 160)) &&
+             (!('preferredTargetLang' in data) || data.preferredTargetLang == null || (data.preferredTargetLang is string && data.preferredTargetLang.size() >= 2 && data.preferredTargetLang.size() <= 16)) &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidApkProject(data) {
+      return data.userId is string &&
+             data.userId == request.auth.uid &&
+             data.userId.size() >= 1 &&
+             data.userId.size() <= 128 &&
+             data.fileName is string &&
+             data.fileName.size() >= 1 &&
+             data.fileName.size() <= 160 &&
+             data.packageName is string &&
+             data.packageName.size() >= 1 &&
+             data.packageName.size() <= 160 &&
+             data.appLabel is string &&
+             data.appLabel.size() >= 1 &&
+             data.appLabel.size() <= 120 &&
+             data.versionName is string &&
+             data.versionName.size() >= 1 &&
+             data.versionName.size() <= 64 &&
+             data.inputSha256 is string &&
+             data.inputSha256.size() == 64 &&
+             (!('outputSha256' in data) || data.outputSha256 == null || (data.outputSha256 is string && data.outputSha256.size() <= 64)) &&
+             data.sourceLang is string &&
+             data.sourceLang.size() >= 2 &&
+             data.sourceLang.size() <= 16 &&
+             data.targetLang is string &&
+             data.targetLang.size() >= 2 &&
+             data.targetLang.size() <= 16 &&
+             data.translationEngine in ['AUTO', 'OFFLINE_ONLY', 'ONLINE_ONLY', 'GEMINI_AI'] &&
+             data.translatedCount is int &&
+             data.translatedCount >= 0 &&
+             data.translatedCount <= 1000000 &&
+             (!('aiSecuritySummary' in data) || data.aiSecuritySummary == null || (data.aiSecuritySummary is string && data.aiSecuritySummary.size() <= 4000)) &&
+             data.status in ['inspected', 'translated', 'signed'] &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if isOwner(userId);
+
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'createdAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'preferredTargetLang', 'createdAt', 'updatedAt']) &&
+                       isValidUserProfile(incoming());
+
+      allow update: if isValidUserProfile(incoming()) &&
+                       isOwner(userId) &&
+                       isValidId(userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'preferredTargetLang', 'updatedAt']);
+
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      match /apk_projects/{projectId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(projectId);
+        allow list: if isOwner(userId) && isValidId(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(projectId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'fileName', 'packageName', 'appLabel', 'versionName',
+                           'inputSha256', 'sourceLang', 'targetLang', 'translationEngine',
+                           'translatedCount', 'status', 'createdAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'fileName', 'packageName', 'appLabel', 'versionName',
+                           'inputSha256', 'outputSha256', 'sourceLang', 'targetLang',
+                           'translationEngine', 'translatedCount', 'aiSecuritySummary',
+                           'status', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidApkProject(incoming());
+
+        allow update: if isValidApkProject(incoming()) &&
+                         isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(projectId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           // Action 1: Attach or refresh Gemini AI analysis summary
+                           incoming().diff(existing()).affectedKeys().hasOnly(['aiSecuritySummary', 'updatedAt']) ||
+                           // Action 2: Progress translation/build state before terminal 'signed' state
+                           (existing().status != 'signed' &&
+                            incoming().diff(existing()).affectedKeys().hasOnly([
+                              'outputSha256', 'targetLang', 'translationEngine',
+                              'translatedCount', 'aiSecuritySummary', 'status', 'updatedAt'
+                            ]))
+                         );
+
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(projectId);
+      }
+    }
+  }
+}
