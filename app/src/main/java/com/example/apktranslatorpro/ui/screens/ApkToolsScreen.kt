@@ -1,7 +1,9 @@
 package com.example.apktranslatorpro.ui.screens
 
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -34,6 +36,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,32 +45,124 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.apktranslatorpro.data.local.RecentApkEntity
 import com.example.apktranslatorpro.data.remote.ApkProjectRemote
+import com.example.apktranslatorpro.ui.viewmodel.BuildProcessUiState
 import com.example.apktranslatorpro.ui.viewmodel.CloudProjectsUiState
+import com.example.apktranslatorpro.ui.viewmodel.FilePickerUiState
 import com.example.apktranslatorpro.ui.viewmodel.GeminiAnalysisUiState
 import com.example.apktranslatorpro.ui.viewmodel.MainUiState
+import com.example.ui.theme.AppThemeMode
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.StatusError
 import com.example.ui.theme.StatusSuccess
 import com.example.ui.theme.StatusWarning
+import java.io.File
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ApkToolsScreen(
     uiState: MainUiState,
+    filePickerState: FilePickerUiState,
+    buildState: BuildProcessUiState,
+    recentApks: List<RecentApkEntity>,
+    themeMode: AppThemeMode,
     cloudProjectsState: CloudProjectsUiState,
     onPickApkClick: () -> Unit,
     onVerifySafIntegrityClick: () -> Unit,
+    onDecompileApkClick: () -> Unit,
+    onRebuildApkClick: () -> Unit,
+    onSaveWorkingFile: (File, String) -> Unit,
+    onBulkRenameKeys: (String, String, Boolean) -> Unit,
+    onUpdateResourceTranslation: (String, String) -> Unit,
+    onExportWorkspaceZip: (Uri) -> Unit,
+    onRegenerateSignerKey: () -> Unit,
+    onDeleteRecentApk: (String) -> Unit,
+    onClearRecentApks: () -> Unit,
     onRunGeminiAnalysisClick: () -> Unit,
     onDeleteCloudProject: (String) -> Unit,
     onOpenBinaryXmlTab: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var activeModule by remember { mutableStateOf<ToolkitModule?>(null) }
+
+    when (val mod = activeModule) {
+        ToolkitModule.XML_EDITOR, ToolkitModule.RESOURCE_EDITOR -> {
+            XmlEditorScreen(
+                buildState = buildState,
+                hasApkSelected = uiState.selectedApkUri != null,
+                onDecompileApkClick = onDecompileApkClick,
+                onSaveXmlFile = onSaveWorkingFile,
+                onBulkRenameKeys = onBulkRenameKeys,
+                onBackClick = { activeModule = null },
+                modifier = modifier
+            )
+            return
+        }
+        ToolkitModule.SIMPLE_EDIT,
+        ToolkitModule.APK_DECOMPILER,
+        ToolkitModule.APK_REBUILDER,
+        ToolkitModule.SMALI_EDITOR,
+        ToolkitModule.DEX_EDITOR,
+        ToolkitModule.JAVA_VIEWER,
+        ToolkitModule.MANIFEST_EDITOR,
+        ToolkitModule.STRING_CREATOR,
+        ToolkitModule.PATCH_CREATOR -> {
+            ToolkitCodeEditorModuleScreen(
+                module = mod,
+                uiState = uiState,
+                buildState = buildState,
+                themeMode = themeMode,
+                onDecompileApk = onDecompileApkClick,
+                onRebuildApk = onRebuildApkClick,
+                onSaveWorkingFile = onSaveWorkingFile,
+                onUpdateResourceTranslation = onUpdateResourceTranslation,
+                onOpenXmlEditor = { activeModule = ToolkitModule.XML_EDITOR },
+                onBackClick = { activeModule = null },
+                modifier = modifier
+            )
+            return
+        }
+        ToolkitModule.DEVELOPER_BROWSER,
+        ToolkitModule.APK_SIGNER,
+        ToolkitModule.ZIP_MANAGER,
+        ToolkitModule.BACKUP_RESTORE,
+        ToolkitModule.NOTIFICATION_MAKER,
+        ToolkitModule.TOAST_MAKER,
+        ToolkitModule.BASE64_TOOLS,
+        ToolkitModule.HTML_ENCODER -> {
+            ToolkitUtilityModuleScreen(
+                module = mod,
+                uiState = uiState,
+                buildState = buildState,
+                recentApks = recentApks,
+                onDecompileApk = onDecompileApkClick,
+                onExportWorkspaceZip = onExportWorkspaceZip,
+                onRebuildAndSignApk = onRebuildApkClick,
+                onRegenerateSignerKey = onRegenerateSignerKey,
+                onDeleteRecentApk = onDeleteRecentApk,
+                onClearRecentApks = onClearRecentApks,
+                onBackClick = { activeModule = null },
+                modifier = modifier
+            )
+            return
+        }
+        ToolkitModule.FULL_EDIT -> {
+            activeModule = null
+            onOpenBinaryXmlTab()
+        }
+        null -> Unit
+    }
+
     val metadata = uiState.apkMetadata
     val inspection = metadata?.fullInspection
 
@@ -78,7 +173,7 @@ fun ApkToolsScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .widthIn(max = 780.dp)
+                .widthIn(max = 820.dp)
                 .testTag("apk_tools_lazy_list"),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -110,6 +205,24 @@ fun ApkToolsScreen(
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
+
+                        val activeSha = filePickerState.sha256Checksum.ifBlank { metadata?.sha256 ?: "" }
+                        if (activeSha.isNotBlank()) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = MaterialTheme.shapes.small,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("file_picker_sha256_badge")
+                            ) {
+                                Text(
+                                    text = "FilePicker SHA-256: $activeSha",
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                        }
 
                         if (uiState.safVerificationSummary.isNotBlank()) {
                             Surface(
@@ -178,6 +291,18 @@ fun ApkToolsScreen(
                 }
             }
 
+            item {
+                ToolkitDashboardGridCard(
+                    onModuleClick = { selected ->
+                        if (selected == ToolkitModule.FULL_EDIT) {
+                            onOpenBinaryXmlTab()
+                        } else {
+                            activeModule = selected
+                        }
+                    }
+                )
+            }
+
             if (metadata != null && inspection != null) {
                 item {
                     Card(
@@ -237,11 +362,7 @@ fun ApkToolsScreen(
                                         shape = MaterialTheme.shapes.small,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Text(
-                                            text = gState.text,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            modifier = Modifier.padding(12.dp)
-                                        )
+                                        Text(text = gState.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
                                     }
                                 }
                                 is GeminiAnalysisUiState.Success -> {
@@ -250,11 +371,7 @@ fun ApkToolsScreen(
                                         shape = MaterialTheme.shapes.small,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Text(
-                                            text = gState.text,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            modifier = Modifier.padding(12.dp)
-                                        )
+                                        Text(text = gState.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
                                     }
                                 }
                                 is GeminiAnalysisUiState.Error -> {
@@ -371,18 +488,6 @@ fun ApkToolsScreen(
                                     }
                                 )
                             }
-
-                            if (inspection.nativeAbis.isNotEmpty()) {
-                                Text("Native Kütüphaneler (.so ABI):", style = MaterialTheme.typography.titleSmall)
-                                inspection.nativeAbis.forEach { (abi, libs) ->
-                                    Text(
-                                        text = "• $abi (${libs.size} .so): ${libs.take(6).joinToString(", ")}${if (libs.size > 6) "..." else ""}",
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                            } else {
-                                Text("Saf Java/Kotlin DEX paketi (native .so kütüphanesi yok).", style = MaterialTheme.typography.bodySmall)
-                            }
                         }
                     }
                 }
@@ -427,17 +532,6 @@ fun ApkToolsScreen(
                                     }
                                 }
                             }
-                            if (inspection.usesPermissions.isEmpty()) {
-                                Text("Manifest içinde izin beyanı bulunamadı.", style = MaterialTheme.typography.bodySmall)
-                            } else {
-                                inspection.usesPermissions.take(20).forEach { perm ->
-                                    Text(
-                                        text = "• $perm",
-                                        fontFamily = JetBrainsMonoFontFamily,
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                }
-                            }
                         }
                     }
                 }
@@ -471,16 +565,12 @@ fun ApkToolsScreen(
                                 }
                             }
                             is CloudProjectsUiState.Error -> {
-                                Text(
-                                    text = cloudProjectsState.message,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = StatusError
-                                )
+                                Text(text = cloudProjectsState.message, style = MaterialTheme.typography.bodySmall, color = StatusError)
                             }
                             is CloudProjectsUiState.Success -> {
                                 if (cloudProjectsState.projects.isEmpty()) {
                                     Text(
-                                        text = "Henüz buluta kaydedilmiş APK projesi yok. Bir APK seçtiğinizde otomatik senkronize edilir.",
+                                        text = "Henüz buluta kaydedilmiş APK projesi yok (Google hesabı ile oturum açıldığında senkronize edilir).",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -493,14 +583,92 @@ fun ApkToolsScreen(
 
             if (cloudProjectsState is CloudProjectsUiState.Success && cloudProjectsState.projects.isNotEmpty()) {
                 items(cloudProjectsState.projects, key = { it.id }) { proj ->
-                    CloudProjectItemCard(
-                        project = proj,
-                        onDelete = { onDeleteCloudProject(proj.id) }
-                    )
+                    CloudProjectItemCard(project = proj, onDelete = { onDeleteCloudProject(proj.id) })
                 }
             }
 
             item { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun ToolkitDashboardGridCard(
+    onModuleClick: (ToolkitModule) -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("toolkit_20_module_grid")
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("APK Araç Kutusu — 20 Modül", style = MaterialTheme.typography.titleLarge)
+            Text(
+                text = "Decompile, Smali renklendirici, XML düzenleme, toplu anahtar değiştirme ve geliştirici yardımcı araçları:",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val columns = when {
+                    maxWidth >= 660.dp -> 4
+                    maxWidth >= 460.dp -> 3
+                    else -> 2
+                }
+                val rows = ToolkitModule.entries.chunked(columns)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    rows.forEach { rowModules ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            rowModules.forEach { mod ->
+                                ElevatedCard(
+                                    onClick = { onModuleClick(mod) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("toolkit_tile_${mod.id}")
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = mod.icon,
+                                            contentDescription = mod.titleTr,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Text(
+                                            text = mod.titleTr,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = mod.subtitleTr,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                            repeat(columns - rowModules.size) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -526,10 +694,7 @@ private fun CloudProjectItemCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "${project.appLabel} (${project.versionName})",
-                        style = MaterialTheme.typography.titleMedium
-                    )
+                    Text(text = "${project.appLabel} (${project.versionName})", style = MaterialTheme.typography.titleMedium)
                     Text(
                         text = "${project.packageName} • ${project.sourceLang.uppercase()} → ${project.targetLang.uppercase()} • ${project.translationEngine}",
                         style = MaterialTheme.typography.labelSmall,
@@ -538,19 +703,10 @@ private fun CloudProjectItemCard(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (project.status == "signed") {
-                        Icon(
-                            imageVector = Icons.Filled.CheckCircle,
-                            contentDescription = "İmzalandı",
-                            tint = StatusSuccess,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Icon(imageVector = Icons.Filled.CheckCircle, contentDescription = "İmzalandı", tint = StatusSuccess, modifier = Modifier.size(18.dp))
                     }
                     IconButton(onClick = onDelete) {
-                        Icon(
-                            imageVector = Icons.Filled.Delete,
-                            contentDescription = "Bulut projesini sil",
-                            tint = MaterialTheme.colorScheme.error
-                        )
+                        Icon(imageVector = Icons.Filled.Delete, contentDescription = "Bulut projesini sil", tint = MaterialTheme.colorScheme.error)
                     }
                 }
             }

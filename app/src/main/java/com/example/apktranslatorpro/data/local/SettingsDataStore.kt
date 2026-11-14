@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.apktranslatorpro.core.security.KeystoreSecretStorage
@@ -21,8 +22,17 @@ private val Context.appSettingsDataStore: DataStore<Preferences> by preferencesD
     name = "apk_translator_settings"
 )
 
+enum class AppUiLanguage(val code: String, val label: String) {
+    TR("tr", "Türkçe"),
+    EN("en", "English"),
+    DE("de", "Deutsch")
+}
+
 data class AppUserSettings(
     val themeMode: AppThemeMode = AppThemeMode.SYSTEM,
+    val appUiLanguage: AppUiLanguage = AppUiLanguage.TR,
+    val isGuestTrialActive: Boolean = false,
+    val guestTranslationsUsed: Int = 0,
     val translationMode: TranslationMode = TranslationMode.AUTO,
     val onlineApiConfig: OnlineApiConfig = OnlineApiConfig(),
     val protectionConfig: TranslationProtectionConfig = TranslationProtectionConfig(),
@@ -30,7 +40,17 @@ data class AppUserSettings(
     val outputTreeUri: String? = null,
     val outputTreeLabel: String = "Uygulama İçi Güvenli Klasör (outputs/)",
     val selectedApkUri: String? = null
-)
+) {
+    val guestTranslationsRemaining: Int
+        get() = (MAX_GUEST_TRIAL_TRANSLATIONS - guestTranslationsUsed).coerceAtLeast(0)
+
+    val isGuestTrialLimitReached: Boolean
+        get() = guestTranslationsUsed >= MAX_GUEST_TRIAL_TRANSLATIONS
+
+    companion object {
+        const val MAX_GUEST_TRIAL_TRANSLATIONS = 2
+    }
+}
 
 class SettingsDataStore(
     private val context: Context,
@@ -38,6 +58,9 @@ class SettingsDataStore(
 ) {
     private object Keys {
         val THEME_MODE = stringPreferencesKey("theme_mode")
+        val APP_UI_LANGUAGE = stringPreferencesKey("app_ui_language")
+        val GUEST_TRIAL_ACTIVE = booleanPreferencesKey("guest_trial_active")
+        val GUEST_TRANSLATIONS_USED = intPreferencesKey("guest_translations_used")
         val TRANSLATION_MODE = stringPreferencesKey("translation_mode")
         val ONLINE_PRESET = stringPreferencesKey("online_preset")
         val ENCRYPTED_API_URL = stringPreferencesKey("encrypted_api_url")
@@ -59,6 +82,10 @@ class SettingsDataStore(
     val settingsFlow: Flow<AppUserSettings> = context.appSettingsDataStore.data.map { prefs ->
         val theme = prefs[Keys.THEME_MODE]?.let { runCatching { AppThemeMode.valueOf(it) }.getOrNull() }
             ?: AppThemeMode.SYSTEM
+        val uiLang = prefs[Keys.APP_UI_LANGUAGE]?.let { runCatching { AppUiLanguage.valueOf(it) }.getOrNull() }
+            ?: AppUiLanguage.TR
+        val isGuestActive = prefs[Keys.GUEST_TRIAL_ACTIVE] ?: false
+        val guestUsed = prefs[Keys.GUEST_TRANSLATIONS_USED] ?: 0
         val mode = prefs[Keys.TRANSLATION_MODE]?.let { runCatching { TranslationMode.valueOf(it) }.getOrNull() }
             ?: TranslationMode.AUTO
         val preset = prefs[Keys.ONLINE_PRESET]?.let { runCatching { OnlineProviderPreset.valueOf(it) }.getOrNull() }
@@ -85,6 +112,9 @@ class SettingsDataStore(
 
         AppUserSettings(
             themeMode = theme,
+            appUiLanguage = uiLang,
+            isGuestTrialActive = isGuestActive,
+            guestTranslationsUsed = guestUsed,
             translationMode = mode,
             onlineApiConfig = OnlineApiConfig(
                 preset = preset,
@@ -107,6 +137,21 @@ class SettingsDataStore(
 
     suspend fun setThemeMode(mode: AppThemeMode) {
         context.appSettingsDataStore.edit { it[Keys.THEME_MODE] = mode.name }
+    }
+
+    suspend fun setAppUiLanguage(language: AppUiLanguage) {
+        context.appSettingsDataStore.edit { it[Keys.APP_UI_LANGUAGE] = language.name }
+    }
+
+    suspend fun setGuestTrialActive(active: Boolean) {
+        context.appSettingsDataStore.edit { it[Keys.GUEST_TRIAL_ACTIVE] = active }
+    }
+
+    suspend fun incrementGuestTranslationsUsed() {
+        context.appSettingsDataStore.edit { prefs ->
+            val current = prefs[Keys.GUEST_TRANSLATIONS_USED] ?: 0
+            prefs[Keys.GUEST_TRANSLATIONS_USED] = current + 1
+        }
     }
 
     suspend fun setTranslationMode(mode: TranslationMode) {

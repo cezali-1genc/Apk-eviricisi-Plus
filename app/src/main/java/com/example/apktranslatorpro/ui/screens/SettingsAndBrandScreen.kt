@@ -21,6 +21,8 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -47,9 +49,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.example.R
+import com.example.apktranslatorpro.data.local.AppUiLanguage
 import com.example.apktranslatorpro.data.local.AppUserSettings
 import com.example.apktranslatorpro.domain.model.OnlineApiConfig
 import com.example.apktranslatorpro.domain.model.OnlineProviderPreset
@@ -60,9 +65,12 @@ import com.example.ui.theme.AppThemeMode
 fun SettingsAndBrandScreen(
     uiState: MainUiState,
     settings: AppUserSettings,
+    isGuestMode: Boolean = false,
     userDisplayName: String = "",
     userEmail: String? = null,
     onSignOutClick: () -> Unit = {},
+    onUpgradeGuestToGoogleClick: () -> Unit = {},
+    onSelectAppUiLanguage: (AppUiLanguage) -> Unit = {},
     onSelectTheme: (AppThemeMode) -> Unit,
     onSaveOnlineApiConfig: (OnlineApiConfig) -> Unit,
     onTestOnlineApiConnection: (OnlineApiConfig) -> Unit,
@@ -94,17 +102,48 @@ fun SettingsAndBrandScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            if (userDisplayName.isNotBlank() || !userEmail.isNullOrBlank()) {
-                item {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth()
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                        if (isGuestMode) {
+                            Text(
+                                text = stringResource(
+                                    R.string.guest_mode_badge,
+                                    settings.guestTranslationsUsed,
+                                    AppUserSettings.MAX_GUEST_TRIAL_TRANSLATIONS
+                                ),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Deneme erişiminde toplam 2 APK çevirisi yapılabilir. Bulut senkronizasyonu ve sınırsız çeviri için Google ile giriş yapın.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Button(
+                                    onClick = onUpgradeGuestToGoogleClick,
+                                    modifier = Modifier.testTag("guest_upgrade_google_button")
+                                ) {
+                                    Icon(Icons.Filled.VerifiedUser, contentDescription = null)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(stringResource(R.string.auth_google_sign_in))
+                                }
+                                OutlinedButton(
+                                    onClick = onSignOutClick,
+                                    modifier = Modifier.testTag("sign_out_button")
+                                ) {
+                                    Text(stringResource(R.string.action_exit_guest))
+                                }
+                            }
+                        } else if (userDisplayName.isNotBlank() || !userEmail.isNullOrBlank()) {
                             Text("Google Hesabı & Bulut Senkronizasyonu", style = MaterialTheme.typography.titleLarge)
                             Text(
                                 text = userDisplayName.ifBlank { "Oturum Açık" },
@@ -122,6 +161,39 @@ fun SettingsAndBrandScreen(
                                 modifier = Modifier.testTag("sign_out_button")
                             ) {
                                 Text("Hesaptan Çıkış Yap")
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Filled.Translate, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Text(stringResource(R.string.settings_app_language_title), style = MaterialTheme.typography.titleLarge)
+                        }
+                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                            AppUiLanguage.entries.forEachIndexed { idx, lang ->
+                                SegmentedButton(
+                                    selected = settings.appUiLanguage == lang,
+                                    onClick = { onSelectAppUiLanguage(lang) },
+                                    shape = SegmentedButtonDefaults.itemShape(idx, AppUiLanguage.entries.size),
+                                    modifier = Modifier.testTag("ui_lang_${lang.code}")
+                                ) {
+                                    Text("${lang.code.uppercase()} • ${lang.label}")
+                                }
                             }
                         }
                     }

@@ -31,9 +31,16 @@ class MainActivityRobolectricTest {
     val composeTestRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun `unauthenticated cold launch displays Google Sign-In screen`() {
-        composeTestRule.waitForIdle()
+    fun `unauthenticated cold launch displays splash then Google Sign-In and Guest Trial options`() {
+        composeTestRule.waitUntil(timeoutMillis = 6_000) {
+            composeTestRule.onAllNodesWithTag("google_sign_in_button")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         composeTestRule.onNodeWithTag("google_sign_in_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("guest_trial_login_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("auth_lang_tr").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("auth_lang_en").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("auth_lang_de").assertIsDisplayed()
     }
 }
 
@@ -45,7 +52,7 @@ class AuthenticatedShellRobolectricTest {
     val composeTestRule = createComposeRule()
 
     @Test
-    fun `authenticated workspace tools and all six navigation tabs render cleanly`() {
+    fun `authenticated workspace tools 20-module grid and all six navigation tabs render cleanly`() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         val vm = MainViewModel(app)
 
@@ -54,8 +61,9 @@ class AuthenticatedShellRobolectricTest {
                 AuthenticatedAppShell(
                     viewModel = vm,
                     cloudViewModel = null,
+                    isGuestMode = true,
                     userDisplayName = "Serhat Güner",
-                    userEmail = "serhat@example.com"
+                    userEmail = null
                 )
             }
         }
@@ -76,6 +84,11 @@ class AuthenticatedShellRobolectricTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("tools_pick_apk_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("verify_saf_integrity_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("apk_tools_lazy_list")
+            .performScrollToNode(hasTestTag("toolkit_20_module_grid"))
+        composeTestRule.onNodeWithTag("toolkit_20_module_grid").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("toolkit_tile_smali_editor").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("toolkit_tile_xml_editor").performScrollTo().assertIsDisplayed()
 
         composeTestRule.onNodeWithTag("nav_rules").performClick()
         composeTestRule.waitForIdle()
@@ -94,12 +107,16 @@ class AuthenticatedShellRobolectricTest {
 
         composeTestRule.onNodeWithTag("nav_settings").performClick()
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("ui_lang_tr").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("ui_lang_en").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("ui_lang_de").assertIsDisplayed()
         composeTestRule.onNodeWithTag("settings_lazy_list")
             .performScrollToNode(hasTestTag("save_api_config_button"))
         composeTestRule.onNodeWithTag("save_api_config_button").performScrollTo().assertIsDisplayed()
 
         composeTestRule.onNodeWithTag("nav_models").performClick()
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("bulk_queue_section").assertIsDisplayed()
         composeTestRule.onNodeWithTag("models_lazy_list")
             .performScrollToNode(hasTestTag("download_active_pair_button"))
         composeTestRule.onNodeWithTag("download_active_pair_button").performScrollTo().assertIsDisplayed()

@@ -2,11 +2,13 @@ package com.example.apktranslatorpro.ui
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,11 +41,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -66,27 +70,36 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.R
+import com.example.apktranslatorpro.data.local.AppUiLanguage
 import com.example.apktranslatorpro.data.remote.FirestoreSyncRepository
-import com.example.apktranslatorpro.domain.model.LanguageResourceScopeConfig
+import com.example.apktranslatorpro.domain.model.LanguageOption
 import com.example.apktranslatorpro.domain.model.OutputApkResult
+import com.example.apktranslatorpro.domain.model.PipelineStage
 import com.example.apktranslatorpro.ui.auth.AuthScreen
 import com.example.apktranslatorpro.ui.auth.GoogleSignInHelper
 import com.example.apktranslatorpro.ui.auth.authStateFlow
+import com.example.apktranslatorpro.ui.components.GlobalBuildProgressBar
 import com.example.apktranslatorpro.ui.components.launchApkDocumentPicker
 import com.example.apktranslatorpro.ui.components.rememberApkSafPickerLauncher
 import com.example.apktranslatorpro.ui.screens.ApkToolsScreen
 import com.example.apktranslatorpro.ui.screens.ModelsAndCacheScreen
 import com.example.apktranslatorpro.ui.screens.PreviewScreen
 import com.example.apktranslatorpro.ui.screens.SettingsAndBrandScreen
+import com.example.apktranslatorpro.ui.screens.SplashScreen
 import com.example.apktranslatorpro.ui.screens.TranslationSettingsScreen
 import com.example.apktranslatorpro.ui.screens.WorkspaceScreen
+import com.example.apktranslatorpro.ui.viewmodel.BuildProcessStep
+import com.example.apktranslatorpro.ui.viewmodel.BuildProcessViewModel
 import com.example.apktranslatorpro.ui.viewmodel.CloudSyncViewModel
+import com.example.apktranslatorpro.ui.viewmodel.FilePickerViewModel
+import com.example.apktranslatorpro.ui.viewmodel.LanguageManagerViewModel
 import com.example.apktranslatorpro.ui.viewmodel.MainViewModel
 import com.example.ui.theme.ApkTranslatorProTheme
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import java.io.File
+import java.util.Locale
 
 @Serializable
 object WorkspaceRoute
@@ -121,32 +134,63 @@ fun ApkTranslatorRoot(
 ) {
     val settings by viewModel.settingsState.collectAsStateWithLifecycle()
     val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
+    var showSplash by rememberSaveable { mutableStateOf(true) }
 
-    ApkTranslatorProTheme(themeMode = settings.themeMode) {
-        val user = currentUser
-        if (user == null) {
-            AuthScreen()
-        } else {
-            val cloudViewModel: CloudSyncViewModel = viewModel(
-                key = user.uid,
-                factory = viewModelFactory {
-                    initializer {
-                        val app = checkNotNull(this[APPLICATION_KEY])
-                        CloudSyncViewModel(
-                            syncRepository = FirestoreSyncRepository(app.applicationContext),
-                            currentUserId = user.uid,
-                            userDisplayName = user.displayName ?: user.email ?: "Cezalı 1Genç Kullanıcısı",
+    val baseContext = LocalContext.current
+    val localizedContext = remember(baseContext, settings.appUiLanguage) {
+        applyUiLocale(baseContext, settings.appUiLanguage)
+    }
+
+    CompositionLocalProvider(LocalContext provides localizedContext) {
+        ApkTranslatorProTheme(themeMode = settings.themeMode) {
+            if (showSplash) {
+                SplashScreen(onFinished = { showSplash = false })
+            } else {
+                val user = currentUser
+                val canEnterGuest = settings.isGuestTrialActive && !settings.isGuestTrialLimitReached
+                when {
+                    user != null -> {
+                        val cloudViewModel: CloudSyncViewModel = viewModel(
+                            key = user.uid,
+                            factory = viewModelFactory {
+                                initializer {
+                                    val app = checkNotNull(this[APPLICATION_KEY])
+                                    CloudSyncViewModel(
+                                        syncRepository = FirestoreSyncRepository(app.applicationContext),
+                                        currentUserId = user.uid,
+                                        userDisplayName = user.displayName ?: user.email ?: "Cezalı 1Genç Kullanıcısı",
+                                        userEmail = user.email
+                                    )
+                                }
+                            }
+                        )
+                        AuthenticatedAppShell(
+                            viewModel = viewModel,
+                            cloudViewModel = cloudViewModel,
+                            isGuestMode = false,
+                            userDisplayName = user.displayName ?: "Kullanıcı",
                             userEmail = user.email
                         )
                     }
+                    canEnterGuest -> {
+                        AuthenticatedAppShell(
+                            viewModel = viewModel,
+                            cloudViewModel = null,
+                            isGuestMode = true,
+                            userDisplayName = "Misafir Kullanıcı",
+                            userEmail = null
+                        )
+                    }
+                    else -> {
+                        AuthScreen(
+                            selectedAppLanguage = settings.appUiLanguage,
+                            guestTranslationsUsed = settings.guestTranslationsUsed,
+                            onSelectAppLanguage = viewModel::setAppUiLanguage,
+                            onGuestTrialLoginClick = viewModel::enterGuestTrial
+                        )
+                    }
                 }
-            )
-            AuthenticatedAppShell(
-                viewModel = viewModel,
-                cloudViewModel = cloudViewModel,
-                userDisplayName = user.displayName ?: "Kullanıcı",
-                userEmail = user.email
-            )
+            }
         }
     }
 }
@@ -156,13 +200,22 @@ fun ApkTranslatorRoot(
 fun AuthenticatedAppShell(
     viewModel: MainViewModel,
     cloudViewModel: CloudSyncViewModel?,
+    isGuestMode: Boolean = false,
     userDisplayName: String,
     userEmail: String?
 ) {
+    val filePickerViewModel: FilePickerViewModel = viewModel(factory = FilePickerViewModel.Factory)
+    val buildProcessViewModel: BuildProcessViewModel = viewModel(factory = BuildProcessViewModel.Factory)
+    val languageManagerViewModel: LanguageManagerViewModel = viewModel(factory = LanguageManagerViewModel.Factory)
+
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val filePickerState by filePickerViewModel.state.collectAsStateWithLifecycle()
+    val buildState by buildProcessViewModel.state.collectAsStateWithLifecycle()
+    val langManagerState by languageManagerViewModel.state.collectAsStateWithLifecycle()
     val settings by viewModel.settingsState.collectAsStateWithLifecycle()
     val cacheCount by viewModel.cacheCountState.collectAsStateWithLifecycle()
     val recentJobs by viewModel.recentJobsState.collectAsStateWithLifecycle()
+    val recentApks by viewModel.recentApksState.collectAsStateWithLifecycle()
 
     val cloudProjectsState = cloudViewModel?.cloudProjectsState?.collectAsStateWithLifecycle()?.value
         ?: com.example.apktranslatorpro.ui.viewmodel.CloudProjectsUiState.Success(emptyList())
@@ -175,6 +228,34 @@ fun AuthenticatedAppShell(
 
     var lastRecordedInputSha by remember { mutableStateOf<String?>(null) }
     var lastRecordedOutputSha by remember { mutableStateOf<String?>(null) }
+
+    // Keep GlobalBuildProgressBar synchronized with MainViewModel pipeline progress
+    LaunchedEffect(uiState.isRunning, uiState.isInspecting, uiState.stage, uiState.progress, uiState.progressDetail) {
+        if (uiState.isRunning || uiState.isInspecting) {
+            val mappedStep = when (uiState.stage) {
+                PipelineStage.VERIFYING_INPUT, PipelineStage.ANALYZING_APK, PipelineStage.EXTRACTING_RESOURCES ->
+                    BuildProcessStep.DECOMPILING
+                PipelineStage.TRANSLATING -> BuildProcessStep.TRANSLATING
+                PipelineStage.REBUILDING_RESOURCES -> BuildProcessStep.REBUILDING_RESOURCES
+                PipelineStage.PACKAGING_APK -> BuildProcessStep.ZIPALIGNING
+                PipelineStage.SIGNING_APK -> BuildProcessStep.SIGNING
+                PipelineStage.VERIFYING_OUTPUT, PipelineStage.SAVING_OUTPUT -> BuildProcessStep.VERIFYING
+                PipelineStage.COMPLETED -> BuildProcessStep.COMPLETED
+                PipelineStage.ERROR -> BuildProcessStep.ERROR
+                PipelineStage.IDLE -> BuildProcessStep.IDLE
+            }
+            buildProcessViewModel.syncPipelineStep(
+                step = mappedStep,
+                progress = uiState.progress,
+                detail = uiState.progressDetail,
+                busy = true
+            )
+        } else if (uiState.stage == PipelineStage.COMPLETED || uiState.stage == PipelineStage.IDLE) {
+            if (!buildState.isBusy) {
+                buildProcessViewModel.syncPipelineStep(BuildProcessStep.IDLE, 0f, "", false)
+            }
+        }
+    }
 
     LaunchedEffect(uiState.apkMetadata?.sha256) {
         val meta = uiState.apkMetadata
@@ -203,6 +284,7 @@ fun AuthenticatedAppShell(
     }
 
     val pickApkLauncher = rememberApkSafPickerLauncher { uri ->
+        filePickerViewModel.onApkUriPicked(uri)
         viewModel.onApkSelected(uri)
     }
 
@@ -224,55 +306,78 @@ fun AuthenticatedAppShell(
         }
     }
 
-    LaunchedEffect(uiState.errorMessage, uiState.statusBannerMessage, cloudSyncMessage) {
-        val msg = uiState.errorMessage ?: uiState.statusBannerMessage ?: cloudSyncMessage
+    LaunchedEffect(
+        uiState.errorMessage,
+        uiState.statusBannerMessage,
+        cloudSyncMessage,
+        buildState.statusMessage,
+        buildState.errorMessage,
+        langManagerState.statusMessage,
+        langManagerState.errorMessage
+    ) {
+        val msg = uiState.errorMessage
+            ?: uiState.statusBannerMessage
+            ?: buildState.errorMessage
+            ?: buildState.statusMessage
+            ?: langManagerState.errorMessage
+            ?: langManagerState.statusMessage
+            ?: cloudSyncMessage
         if (!msg.isNullOrBlank()) {
             snackbarHostState.showSnackbar(msg)
             viewModel.dismissMessages()
+            buildProcessViewModel.clearBanner()
+            languageManagerViewModel.clearMessages()
             cloudViewModel?.clearSyncMessage()
         }
     }
 
-    val destinations = remember {
+    val workspaceLabel = stringResource(R.string.nav_workspace)
+    val toolsLabel = stringResource(R.string.nav_tools)
+    val previewLabel = stringResource(R.string.nav_preview)
+    val rulesLabel = stringResource(R.string.nav_rules)
+    val modelsLabel = stringResource(R.string.nav_models)
+    val settingsLabel = stringResource(R.string.nav_settings)
+
+    val destinations = remember(workspaceLabel, toolsLabel, previewLabel, rulesLabel, modelsLabel, settingsLabel) {
         listOf(
             TopDestination(
                 route = WorkspaceRoute,
-                label = "Çalışma",
+                label = workspaceLabel,
                 selectedIcon = Icons.Filled.Build,
                 unselectedIcon = Icons.Outlined.Build,
                 testTag = "nav_workspace"
             ),
             TopDestination(
                 route = ApkToolsRoute,
-                label = "Araçlar",
+                label = toolsLabel,
                 selectedIcon = Icons.Filled.Security,
                 unselectedIcon = Icons.Outlined.Security,
                 testTag = "nav_tools"
             ),
             TopDestination(
                 route = PreviewRoute,
-                label = "Önizleme",
+                label = previewLabel,
                 selectedIcon = Icons.Filled.Preview,
                 unselectedIcon = Icons.Outlined.Preview,
                 testTag = "nav_preview"
             ),
             TopDestination(
                 route = TranslationRulesRoute,
-                label = "Kurallar",
+                label = rulesLabel,
                 selectedIcon = Icons.Filled.Tune,
                 unselectedIcon = Icons.Outlined.Tune,
                 testTag = "nav_rules"
             ),
             TopDestination(
                 route = ModelsRoute,
-                label = "Modeller",
+                label = modelsLabel,
                 selectedIcon = Icons.Filled.Language,
                 unselectedIcon = Icons.Outlined.Language,
                 testTag = "nav_models"
             ),
             TopDestination(
                 route = SettingsRoute,
-                label = "Ayarlar",
+                label = settingsLabel,
                 selectedIcon = Icons.Filled.Settings,
                 unselectedIcon = Icons.Outlined.Settings,
                 testTag = "nav_settings"
@@ -304,17 +409,20 @@ fun AuthenticatedAppShell(
             contentWindowInsets = WindowInsets.safeDrawing,
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             topBar = {
-                TopAppBar(
-                    title = {
-                        Text(
-                            text = stringResource(R.string.app_name),
-                            style = MaterialTheme.typography.titleLarge
+                Column {
+                    TopAppBar(
+                        title = {
+                            Text(
+                                text = stringResource(R.string.app_name),
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.background
                         )
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background
                     )
-                )
+                    GlobalBuildProgressBar(buildState = buildState)
+                }
             },
             bottomBar = {
                 if (!useRail) {
@@ -381,7 +489,10 @@ fun AuthenticatedAppShell(
                             uiState = uiState,
                             settings = settings,
                             onPickApkClick = launchApkPicker,
-                            onVerifySafExistenceClick = viewModel::verifySelectedSafFileIntegrity,
+                            onVerifySafExistenceClick = {
+                                filePickerViewModel.recalculateChecksum()
+                                viewModel.verifySelectedSafFileIntegrity()
+                            },
                             onPickOutputFolderClick = {
                                 pickOutputFolderLauncher.launch(null)
                             },
@@ -389,9 +500,13 @@ fun AuthenticatedAppShell(
                             onSelectTargetLanguage = viewModel::setTargetLanguage,
                             onSelectTranslationMode = viewModel::setTranslationMode,
                             onUpdateResourceScopeConfig = viewModel::saveResourceScopeConfig,
-                            onStartPipelineClick = viewModel::requestStartPipeline,
+                            onStartPipelineClick = {
+                                viewModel.requestStartPipeline(isAuthenticatedUser = !isGuestMode)
+                            },
                             onCancelPipelineClick = viewModel::cancelActivePipeline,
-                            onConfirmOnlineConsent = viewModel::confirmOnlineConsentAndStart,
+                            onConfirmOnlineConsent = {
+                                viewModel.confirmOnlineConsentAndStart(isAuthenticatedUser = !isGuestMode)
+                            },
                             onDismissOnlineConsent = viewModel::dismissOnlineConsent,
                             onInstallOutputApk = { output ->
                                 val msg = launchApkInstaller(context, output)
@@ -417,9 +532,36 @@ fun AuthenticatedAppShell(
                     composable<ApkToolsRoute> {
                         ApkToolsScreen(
                             uiState = uiState,
+                            filePickerState = filePickerState,
+                            buildState = buildState,
+                            recentApks = recentApks,
+                            themeMode = settings.themeMode,
                             cloudProjectsState = cloudProjectsState,
                             onPickApkClick = launchApkPicker,
-                            onVerifySafIntegrityClick = viewModel::verifySelectedSafFileIntegrity,
+                            onVerifySafIntegrityClick = {
+                                filePickerViewModel.recalculateChecksum()
+                                viewModel.verifySelectedSafFileIntegrity()
+                            },
+                            onDecompileApkClick = {
+                                val uriStr = uiState.selectedApkUri ?: return@ApkToolsScreen
+                                buildProcessViewModel.decompileFromUri(Uri.parse(uriStr))
+                            },
+                            onRebuildApkClick = {
+                                viewModel.rebuildApkFromCurrentPreview()
+                            },
+                            onSaveWorkingFile = { file, newContent ->
+                                buildProcessViewModel.saveWorkingFile(file, newContent)
+                            },
+                            onBulkRenameKeys = { oldK, newK, prefix ->
+                                buildProcessViewModel.performBulkKeyRename(oldK, newK, prefix)
+                            },
+                            onUpdateResourceTranslation = viewModel::updateResourceTranslation,
+                            onExportWorkspaceZip = { targetUri ->
+                                buildProcessViewModel.exportWorkspaceZip(targetUri)
+                            },
+                            onRegenerateSignerKey = viewModel::regenerateSignerKey,
+                            onDeleteRecentApk = viewModel::deleteRecentApk,
+                            onClearRecentApks = viewModel::clearRecentApks,
                             onRunGeminiAnalysisClick = {
                                 viewModel.runGeminiApkAnalysis { summary ->
                                     cloudViewModel?.attachGeminiSummary(summary)
@@ -456,14 +598,46 @@ fun AuthenticatedAppShell(
                     }
 
                     composable<ModelsRoute> {
+                        val effectiveSource = remember(uiState.selectedSourceLanguage, uiState.apkMetadata) {
+                            if (uiState.selectedSourceLanguage == LanguageOption.AUTO) {
+                                uiState.apkMetadata?.detectedSourceLanguage ?: LanguageOption.ENGLISH
+                            } else {
+                                uiState.selectedSourceLanguage
+                            }
+                        }
+                        val xmlPaths = remember(buildState.workspace) {
+                            buildState.workspace?.let { ws ->
+                                ws.resXmlFiles.mapNotNull { f -> runCatching { f.relativeTo(ws.workDir).path }.getOrNull() }
+                            }.orEmpty()
+                        }
                         ModelsAndCacheScreen(
                             uiState = uiState,
+                            langManagerState = langManagerState,
+                            availableXmlPaths = xmlPaths,
                             cacheCount = cacheCount,
                             recentJobs = recentJobs,
-                            onRefreshModels = viewModel::refreshOfflineModels,
-                            onDownloadModel = viewModel::downloadOfflineModel,
-                            onDeleteModel = viewModel::deleteOfflineModel,
+                            onRefreshModels = {
+                                languageManagerViewModel.refreshModels()
+                                viewModel.refreshOfflineModels()
+                            },
+                            onDownloadModel = { lang ->
+                                languageManagerViewModel.downloadLanguageModel(lang)
+                                viewModel.downloadOfflineModel(lang)
+                            },
+                            onDeleteModel = { lang ->
+                                languageManagerViewModel.deleteLanguageModel(lang)
+                                viewModel.deleteOfflineModel(lang)
+                            },
                             onDownloadActivePair = viewModel::downloadActiveLanguagePair,
+                            onToggleQueueLocale = languageManagerViewModel::toggleQueueLocale,
+                            onToggleQueueFile = languageManagerViewModel::toggleQueuedResourceFile,
+                            onRunBulkQueue = {
+                                languageManagerViewModel.runBulkTranslationQueue(
+                                    baseResources = uiState.resources,
+                                    sourceLanguage = effectiveSource,
+                                    workDir = buildState.workspace?.workDir
+                                )
+                            },
                             onClearCache = viewModel::clearTranslationCache,
                             onClearHistory = viewModel::clearJobHistory
                         )
@@ -473,13 +647,22 @@ fun AuthenticatedAppShell(
                         SettingsAndBrandScreen(
                             uiState = uiState,
                             settings = settings,
+                            isGuestMode = isGuestMode,
                             userDisplayName = userDisplayName,
                             userEmail = userEmail,
                             onSignOutClick = {
-                                scope.launch {
-                                    GoogleSignInHelper.signOut(context)
+                                if (isGuestMode) {
+                                    viewModel.exitGuestTrial()
+                                } else {
+                                    scope.launch {
+                                        GoogleSignInHelper.signOut(context)
+                                    }
                                 }
                             },
+                            onUpgradeGuestToGoogleClick = {
+                                viewModel.exitGuestTrial()
+                            },
+                            onSelectAppUiLanguage = viewModel::setAppUiLanguage,
                             onSelectTheme = viewModel::setThemeMode,
                             onSaveOnlineApiConfig = viewModel::saveOnlineApiConfig,
                             onTestOnlineApiConnection = viewModel::testOnlineApiConnection,
@@ -490,6 +673,13 @@ fun AuthenticatedAppShell(
             }
         }
     }
+}
+
+private fun applyUiLocale(base: Context, language: AppUiLanguage): Context {
+    val locale = Locale.forLanguageTag(language.code)
+    val config = Configuration(base.resources.configuration)
+    config.setLocale(locale)
+    return base.createConfigurationContext(config)
 }
 
 private fun launchApkInstaller(context: Context, output: OutputApkResult): String? {

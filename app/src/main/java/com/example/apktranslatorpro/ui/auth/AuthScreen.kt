@@ -16,10 +16,14 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.VerifiedUser
@@ -27,8 +31,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -50,16 +57,25 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.apktranslatorpro.data.local.AppUiLanguage
+import com.example.apktranslatorpro.data.local.AppUserSettings
 import kotlinx.coroutines.launch
 
 @Composable
 fun AuthScreen(
+    selectedAppLanguage: AppUiLanguage = AppUiLanguage.TR,
+    guestTranslationsUsed: Int = 0,
+    onSelectAppLanguage: (AppUiLanguage) -> Unit = {},
+    onGuestTrialLoginClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val remainingTrial = (AppUserSettings.MAX_GUEST_TRIAL_TRANSLATIONS - guestTranslationsUsed).coerceAtLeast(0)
+    val trialLimitReached = guestTranslationsUsed >= AppUserSettings.MAX_GUEST_TRIAL_TRANSLATIONS
 
     LaunchedEffect(Unit) {
         GoogleSignInHelper.attemptSilentSignIn(context)
@@ -73,6 +89,7 @@ fun AuthScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
                 .padding(20.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -84,15 +101,15 @@ fun AuthScreen(
                     .fillMaxWidth()
                     .widthIn(max = 500.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(170.dp)
+                            .height(185.dp)
                     ) {
                         Image(
                             painter = painterResource(id = R.drawable.img_studio_banner),
-                            contentDescription = "Apk Çeviricisi Plus banner",
+                            contentDescription = stringResource(R.string.app_name),
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -101,26 +118,48 @@ fun AuthScreen(
                                 .fillMaxSize()
                                 .background(
                                     Brush.verticalGradient(
-                                        listOf(Color(0xBB090D16), Color(0xF00B111E))
+                                        listOf(Color(0xAA090D16), Color(0xF20B111E))
                                     )
                                 )
                         )
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(20.dp),
+                                .padding(18.dp),
                             verticalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Surface(
-                                color = Color(0x3322D3EE),
-                                shape = RoundedCornerShape(50.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "CEZALI 1GENÇ • SERHAT GÜNER",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF67E8F9),
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                )
+                                Surface(
+                                    color = Color(0x3322D3EE),
+                                    shape = RoundedCornerShape(50.dp)
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.brand_badge),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF67E8F9),
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    AppUiLanguage.entries.forEach { lang ->
+                                        FilterChip(
+                                            selected = selectedAppLanguage == lang,
+                                            onClick = { onSelectAppLanguage(lang) },
+                                            label = { Text(lang.code.uppercase(), style = MaterialTheme.typography.labelSmall) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                labelColor = Color.White,
+                                                selectedContainerColor = Color(0xFF22D3EE),
+                                                selectedLabelColor = Color(0xFF00252E)
+                                            ),
+                                            modifier = Modifier.testTag("auth_lang_${lang.code}")
+                                        )
+                                    }
+                                }
                             }
                             Column {
                                 Text(
@@ -129,7 +168,7 @@ fun AuthScreen(
                                     color = Color.White
                                 )
                                 Text(
-                                    text = "Tam APK Araç Kutusu, Gemini AI Çeviri, Binary ARSC & v1/v2/v3 İmzalama",
+                                    text = stringResource(R.string.auth_subtitle),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color(0xFFCBD5E1)
                                 )
@@ -138,24 +177,54 @@ fun AuthScreen(
                     }
 
                     Column(
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         FeatureRow(
                             icon = Icons.Filled.AutoAwesome,
-                            title = "Gemini AI & Çevrimdışı ML Kit",
-                            subtitle = "Bağlama duyarlı yapay zeka çevirisi ve APK güvenlik analizi"
+                            title = stringResource(R.string.auth_feature_ai_title),
+                            subtitle = stringResource(R.string.auth_feature_ai_sub)
                         )
                         FeatureRow(
                             icon = Icons.Filled.Security,
-                            title = "ApkSecurityUtils & v3 İmzalama",
-                            subtitle = "SAF salt okunur SHA-256 doğrulama, zipalign ve apksig"
+                            title = stringResource(R.string.auth_feature_sec_title),
+                            subtitle = stringResource(R.string.auth_feature_sec_sub)
                         )
                         FeatureRow(
                             icon = Icons.Filled.CloudDone,
-                            title = "Firebase Bulut Senkronizasyonu",
-                            subtitle = "APK analiz geçmişiniz ve yapay zeka raporlarınız hesabınızla güvende"
+                            title = stringResource(R.string.auth_feature_cloud_title),
+                            subtitle = stringResource(R.string.auth_feature_cloud_sub)
                         )
+
+                        if (trialLimitReached) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                shape = MaterialTheme.shapes.small,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("trial_limit_reached_banner")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Lock,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                    Text(
+                                        text = stringResource(
+                                            R.string.auth_trial_limit_reached,
+                                            AppUserSettings.MAX_GUEST_TRIAL_TRANSLATIONS
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                }
+                            }
+                        }
 
                         if (!errorMessage.isNullOrBlank()) {
                             Surface(
@@ -204,11 +273,32 @@ fun AuthScreen(
                                     color = MaterialTheme.colorScheme.onPrimary
                                 )
                                 Spacer(Modifier.width(10.dp))
-                                Text("Giriş Yapılıyor...")
+                                Text(stringResource(R.string.auth_signing_in))
                             } else {
                                 Icon(Icons.Filled.VerifiedUser, contentDescription = null)
                                 Spacer(Modifier.width(10.dp))
-                                Text("Google ile Giriş Yap")
+                                Text(stringResource(R.string.auth_google_sign_in))
+                            }
+                        }
+
+                        if (!trialLimitReached) {
+                            OutlinedButton(
+                                onClick = onGuestTrialLoginClick,
+                                enabled = !isLoading,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("guest_trial_login_button")
+                            ) {
+                                Icon(Icons.Filled.PersonOutline, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    stringResource(
+                                        R.string.auth_guest_trial_button,
+                                        remainingTrial,
+                                        AppUserSettings.MAX_GUEST_TRIAL_TRANSLATIONS
+                                    )
+                                )
                             }
                         }
 
@@ -227,7 +317,7 @@ fun AuthScreen(
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = "Orijinal APK dosyalarınız cihazınızdan izinsiz gönderilmez.",
+                                text = stringResource(R.string.auth_privacy_note),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

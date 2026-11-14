@@ -12,8 +12,10 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.apktranslatorpro.ApkTranslatorApp
 import com.example.apktranslatorpro.core.apk.ValuesXmlCodec
 import com.example.apktranslatorpro.core.text.TranslationProtectionConfig
+import com.example.apktranslatorpro.data.local.AppUiLanguage
 import com.example.apktranslatorpro.data.local.AppUserSettings
 import com.example.apktranslatorpro.data.local.JobHistoryEntity
+import com.example.apktranslatorpro.data.local.RecentApkEntity
 import com.example.apktranslatorpro.data.repository.InspectedApkSession
 import com.example.apktranslatorpro.domain.model.ApkMetadata
 import com.example.apktranslatorpro.domain.model.LanguageOption
@@ -86,6 +88,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as ApkTranslatorApp
     private val repository = app.repository
     private val settingsStore = app.settingsDataStore
+    private val recentApkRepository = app.recentApkRepository
     private val mlKitEngine = app.mlKitEngine
     private val onlineEngine = app.onlineEngine
     private val signerEngine = app.signerEngine
@@ -100,6 +103,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     val recentJobsState: StateFlow<List<JobHistoryEntity>> = repository.recentJobsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val recentApksState: StateFlow<List<RecentApkEntity>> = recentApkRepository.recentApksFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private var currentSession: InspectedApkSession? = null
@@ -172,7 +178,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update { it.copy(stage = stage, progressDetail = msg) }
                 }
                 currentSession = session
-                val detected = session.metadata.detectedSourceLanguage
+                val meta = session.metadata
+                recentApkRepository.recordApk(
+                    RecentApkEntity(
+                        sha256Hex = meta.sha256,
+                        fileName = meta.fileName,
+                        originalUriOrPath = uri.toString(),
+                        packageName = meta.packageName,
+                        appLabel = meta.appLabel,
+                        fileSizeBytes = meta.fileSizeBytes,
+                        lastAction = "İncelendi (${meta.versionName})"
+                    )
+                )
+                val detected = meta.detectedSourceLanguage
                 val defaultTarget = if (detected == LanguageOption.TURKISH) {
                     LanguageOption.ENGLISH
                 } else {
@@ -345,6 +363,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { settingsStore.setThemeMode(mode) }
     }
 
+    fun setAppUiLanguage(language: AppUiLanguage) {
+        viewModelScope.launch { settingsStore.setAppUiLanguage(language) }
+    }
+
+    fun enterGuestTrial() {
+        viewModelScope.launch {
+            if (!settingsState.value.isGuestTrialLimitReached) {
+                settingsStore.setGuestTrialActive(true)
+            }
+        }
+    }
+
+    fun exitGuestTrial() {
+        viewModelScope.launch { settingsStore.setGuestTrialActive(false) }
+    }
+
+    fun deleteRecentApk(sha256Hex: String) {
+        viewModelScope.launch { recentApkRepository.deleteApk(sha256Hex) }
+    }
+
+    fun clearRecentApks() {
+        viewModelScope.launch { recentApkRepository.clearAll() }
+    }
+
     fun saveOnlineApiConfig(config: OnlineApiConfig) {
         viewModelScope.launch {
             settingsStore.saveOnlineApiConfig(config)
@@ -408,13 +450,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun requestStartPipeline() {
+    fun requestStartPipeline(isAuthenticatedUser: Boolean = false) {
         val session = currentSession
         if (session == null) {
             _uiState.update { it.copy(errorMessage = "Lütfen önce bir APK dosyası seçin.") }
             return
         }
         val settings = settingsState.value
+        if (!isAuthenticatedUser && settings.isGuestTrialActive && settings.isGuestTrialLimitReached) {
+            _uiState.update {
+                it.copy(errorMessage = "Deneme sürümündeki 2 uygulama çeviri hakkınız doldu. Devam etmek için Google ile giriş yapın.")
+            }
+            viewModelScope.launch { settingsStore.setGuestTrialActive(false) }
+            return
+        }
         val needsConsent = settings.translationMode == TranslationMode.ONLINE_ONLY ||
             (settings.translationMode == TranslationMode.AUTO &&
                 onlineEngine.isNetworkConnected() &&
@@ -423,13 +472,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (needsConsent) {
             _uiState.update { it.copy(showOnlineConsentDialog = true) }
         } else {
-            runFullPipeline()
+            runFullPipeline(isAuthenticatedUser = isAuthenticatedUser)
         }
     }
 
-    fun confirmOnlineConsentAndStart() {
+    fun confirmOnlineConsentAndStart(isAuthenticatedUser: Boolean = false) {
         _uiState.update { it.copy(showOnlineConsentDialog = false) }
-        runFullPipeline()
+        runFullPipeline(isAuthenticatedUser = isAuthenticatedUser)
     }
 
     fun dismissOnlineConsent() {
@@ -450,7 +499,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun runFullPipeline() {
+    private fun runFullPipeline(isAuthenticatedUser: Boolean = false) {
         val session = currentSession ?: return
         val state = _uiState.value
         val settings = settingsState.value
@@ -538,13 +587,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     onLog = { level, stage, msg -> appendLog(level, stage, msg) }
                 )
 
+                recentApkRepository.recordApk(
+                    RecentApkEntity(
+                        sha256Hex = session.metadata.sha256,
+                        fileName = result.fileName,
+                        originalUriOrPath = session.metadata.uriString,
+                        packageName = session.metadata.packageName,
+                        appLabel = session.metadata.appLabel,
+                        fileSizeBytes = session.metadata.fileSizeBytes,
+                        outputPath = result.workspaceFilePath,
+                        lastAction = "Çevrildi & İmzalandı (${target.code.uppercase()})"
+                    )
+                )
+
+                var guestLimitNote: String? = null
+                if (!isAuthenticatedUser && settings.isGuestTrialActive) {
+                    settingsStore.incrementGuestTranslationsUsed()
+                    val nextUsed = settings.guestTranslationsUsed + 1
+                    guestLimitNote = if (nextUsed >= AppUserSettings.MAX_GUEST_TRIAL_TRANSLATIONS) {
+                        "Deneme hakkınız doldu (${nextUsed}/2). Yeni çeviri için Google ile giriş yapmalısınız."
+                    } else {
+                        "Deneme çevirisi tamamlandı (${nextUsed}/2 kullanıldı)."
+                    }
+                }
+
                 _uiState.update {
                     it.copy(
                         isRunning = false,
                         stage = PipelineStage.COMPLETED,
                         progress = 1f,
                         progressDetail = "APK başarıyla oluşturuldu ve imzalandı!",
-                        outputResult = result
+                        outputResult = result,
+                        statusBannerMessage = guestLimitNote
                     )
                 }
             } catch (ex: CancellationException) {
