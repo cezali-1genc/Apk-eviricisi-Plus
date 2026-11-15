@@ -110,6 +110,8 @@ fun WorkspaceScreen(
     uiState: MainUiState,
     settings: AppUserSettings,
     onPickApkClick: () -> Unit,
+    onPickBatchApksClick: () -> Unit = {},
+    onRunBatchApksClick: () -> Unit = {},
     onVerifySafExistenceClick: () -> Unit = {},
     onPickOutputFolderClick: () -> Unit,
     onSelectSourceLanguage: (LanguageOption) -> Unit,
@@ -117,6 +119,7 @@ fun WorkspaceScreen(
     onSelectTranslationMode: (TranslationMode) -> Unit,
     onUpdateResourceScopeConfig: (LanguageResourceScopeConfig) -> Unit = {},
     onStartPipelineClick: () -> Unit,
+    onStartBackgroundWorkClick: () -> Unit = {},
     onCancelPipelineClick: () -> Unit,
     onConfirmOnlineConsent: () -> Unit,
     onDismissOnlineConsent: () -> Unit,
@@ -187,6 +190,8 @@ fun WorkspaceScreen(
                 ApkSelectorCard(
                     uiState = uiState,
                     onPickApkClick = onPickApkClick,
+                    onPickBatchApksClick = onPickBatchApksClick,
+                    onRunBatchApksClick = onRunBatchApksClick,
                     onVerifySafExistenceClick = onVerifySafExistenceClick,
                     onOpenPreviewTab = onOpenPreviewTab,
                     onOpenToolsTab = onOpenToolsTab
@@ -210,6 +215,7 @@ fun WorkspaceScreen(
                 PipelineControlCard(
                     uiState = uiState,
                     onStartClick = onStartPipelineClick,
+                    onStartBackgroundWorkClick = onStartBackgroundWorkClick,
                     onCancelClick = onCancelPipelineClick
                 )
             }
@@ -324,6 +330,8 @@ private fun StudioHeroBanner() {
 private fun ApkSelectorCard(
     uiState: MainUiState,
     onPickApkClick: () -> Unit,
+    onPickBatchApksClick: () -> Unit,
+    onRunBatchApksClick: () -> Unit,
     onVerifySafExistenceClick: () -> Unit,
     onOpenPreviewTab: () -> Unit,
     onOpenToolsTab: () -> Unit
@@ -388,6 +396,40 @@ private fun ApkSelectorCard(
                 onVerifyExistenceClick = onVerifySafExistenceClick
             )
 
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = onPickBatchApksClick,
+                    enabled = !uiState.isRunning && !isInspecting,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("pick_batch_apks_button")
+                ) {
+                    Icon(Icons.Filled.FolderOpen, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Çoklu APK Kuyruğu (${uiState.batchApkUris.size})")
+                }
+                if (uiState.batchApkUris.isNotEmpty()) {
+                    Button(
+                        onClick = onRunBatchApksClick,
+                        enabled = !uiState.isRunning,
+                        modifier = Modifier.testTag("run_batch_apks_button")
+                    ) {
+                        Text("Toplu Çevir")
+                    }
+                }
+            }
+            if (uiState.batchStatusSummary.isNotBlank()) {
+                Text(
+                    text = uiState.batchStatusSummary,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
             if (isInspecting) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 Text(
@@ -407,15 +449,38 @@ private fun ApkSelectorCard(
                         modifier = Modifier.padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = "${metadata.appLabel} (${metadata.versionName})",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Text(
-                            text = "Paket: ${metadata.packageName}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            if (uiState.appIconBitmap != null) {
+                                Image(
+                                    bitmap = uiState.appIconBitmap,
+                                    contentDescription = "${metadata.appLabel} uygulama simgesi",
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Filled.Android,
+                                    contentDescription = "${metadata.appLabel} simgesi",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "${metadata.appLabel} (${metadata.versionName})",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = "Paket: ${metadata.packageName}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
                         Text(
                             text = "Dosya: ${metadata.fileName} • ${formatBytes(metadata.fileSizeBytes)} • SDK ${metadata.minSdkVersion}–${metadata.targetSdkVersion}",
                             style = MaterialTheme.typography.bodySmall,
@@ -788,6 +853,7 @@ private fun LanguageAndEngineCard(
 private fun PipelineControlCard(
     uiState: MainUiState,
     onStartClick: () -> Unit,
+    onStartBackgroundWorkClick: () -> Unit,
     onCancelClick: () -> Unit
 ) {
     Card(
@@ -875,6 +941,15 @@ private fun PipelineControlCard(
                         Icon(Icons.Filled.Close, contentDescription = "İşlemi durdur")
                     }
                 }
+            }
+            OutlinedButton(
+                onClick = onStartBackgroundWorkClick,
+                enabled = uiState.apkMetadata != null && !uiState.isRunning,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("workspace_workmanager_button")
+            ) {
+                Text("Arka Planda Çalıştır (WorkManager: ${uiState.backgroundWorkStatus})")
             }
 
             Row(

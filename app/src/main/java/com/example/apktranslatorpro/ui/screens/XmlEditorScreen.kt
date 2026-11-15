@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Save
@@ -63,6 +64,7 @@ fun XmlEditorScreen(
     onDecompileApkClick: () -> Unit,
     onSaveXmlFile: (File, String) -> Unit,
     onBulkRenameKeys: (oldKeyOrPrefix: String, newKeyOrPrefix: String, prefixMode: Boolean) -> Unit,
+    onOpenXmlDiffComparison: () -> Unit = {},
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -240,6 +242,16 @@ fun XmlEditorScreen(
                                 ) {
                                     Text("Geri Al")
                                 }
+                            }
+                            OutlinedButton(
+                                onClick = onOpenXmlDiffComparison,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("xml_editor_open_diff_button")
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.CompareArrows, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Orijinal ile Yan Yana XML Karşılaştır (Diff)")
                             }
                         }
                     }

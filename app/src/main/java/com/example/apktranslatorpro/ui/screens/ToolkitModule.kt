@@ -6,13 +6,17 @@ import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Compare
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.DataObject
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Difference
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FolderCopy
+import androidx.compose.material.icons.filled.FolderSpecial
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Html
 import androidx.compose.material.icons.filled.Key
@@ -39,6 +43,10 @@ enum class ToolkitModule(
     FULL_EDIT("full_edit", "Tam Düzenleme", "ARSC & Önizleme", ToolkitCategory.CODE_AND_APK, Icons.Filled.DriveFileRenameOutline),
     APK_DECOMPILER("apk_decompiler", "APK Decompiler", "Apktool önbellek", ToolkitCategory.CODE_AND_APK, Icons.Filled.FolderCopy),
     APK_REBUILDER("apk_rebuilder", "APK Rebuilder", "Yeniden derle", ToolkitCategory.CODE_AND_APK, Icons.Filled.Build),
+    XML_DIFF("xml_diff", "XML Karşılaştır", "Yan yana diff", ToolkitCategory.CODE_AND_APK, Icons.AutoMirrored.Filled.CompareArrows),
+    APK_COMPARE("apk_compare", "APK Karşılaştır", "Sürüm & SHA fark", ToolkitCategory.CODE_AND_APK, Icons.Filled.Compare),
+    GIT_INTEGRATION("git_clone", "Git & Git Clone", "HTTPS clone & push", ToolkitCategory.CODE_AND_APK, Icons.Filled.CloudSync),
+    PROJECT_MANAGER("project_manager", "Proje & Sözlük", "Room & WorkManager", ToolkitCategory.CODE_AND_APK, Icons.Filled.FolderSpecial),
     SMALI_EDITOR("smali_editor", "Smali Editör", "Renkli bytecode", ToolkitCategory.CODE_AND_APK, Icons.Filled.Terminal),
     DEX_EDITOR("dex_editor", "DEX İnceleyici", "Sınıf & metotlar", ToolkitCategory.CODE_AND_APK, Icons.Filled.Memory),
     JAVA_VIEWER("java_viewer", "Java Görüntüleyici", "DEX → Java kodu", ToolkitCategory.CODE_AND_APK, Icons.Filled.DataObject),

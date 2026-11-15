@@ -31,7 +31,7 @@ class MainActivityRobolectricTest {
     val composeTestRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun `unauthenticated cold launch displays splash then Google Sign-In and Guest Trial options`() {
+    fun `unauthenticated cold launch displays splash then Google Sign-In and Guest Trial options and enters workspace cleanly`() {
         composeTestRule.waitUntil(timeoutMillis = 6_000) {
             composeTestRule.onAllNodesWithTag("google_sign_in_button")
                 .fetchSemanticsNodes().isNotEmpty()
@@ -41,6 +41,13 @@ class MainActivityRobolectricTest {
         composeTestRule.onNodeWithTag("auth_lang_tr").assertIsDisplayed()
         composeTestRule.onNodeWithTag("auth_lang_en").assertIsDisplayed()
         composeTestRule.onNodeWithTag("auth_lang_de").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("guest_trial_login_button").performClick()
+        composeTestRule.waitUntil(timeoutMillis = 6_000) {
+            composeTestRule.onAllNodesWithTag("select_apk_button")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeTestRule.onNodeWithTag("select_apk_button").assertIsDisplayed()
     }
 }
 

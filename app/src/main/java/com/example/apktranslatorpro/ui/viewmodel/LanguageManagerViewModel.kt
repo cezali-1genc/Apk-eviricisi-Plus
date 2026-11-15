@@ -63,7 +63,7 @@ class LanguageManagerViewModel(application: Application) : AndroidViewModel(appl
     fun refreshModels() {
         viewModelScope.launch(Dispatchers.IO) {
             _state.update { it.copy(isRefreshing = true, errorMessage = null) }
-            val states = mlKitEngine.listOfflineModelStates()
+            val states = runCatching { mlKitEngine.listOfflineModelStates() }.getOrDefault(emptyList())
             _state.update {
                 it.copy(
                     modelStates = states,

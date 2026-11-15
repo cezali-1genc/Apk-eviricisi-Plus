@@ -4,18 +4,25 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.work.WorkInfo
 import com.example.apktranslatorpro.ApkTranslatorApp
+import com.example.apktranslatorpro.core.apk.ApkIconExtractor
 import com.example.apktranslatorpro.core.apk.ValuesXmlCodec
 import com.example.apktranslatorpro.core.text.TranslationProtectionConfig
+import com.example.apktranslatorpro.core.text.TranslationQualityTools
+import com.example.apktranslatorpro.core.work.BackgroundTranslationWorker
 import com.example.apktranslatorpro.data.local.AppUiLanguage
 import com.example.apktranslatorpro.data.local.AppUserSettings
 import com.example.apktranslatorpro.data.local.JobHistoryEntity
 import com.example.apktranslatorpro.data.local.RecentApkEntity
+import com.example.apktranslatorpro.data.local.TranslationProjectEntity
+import com.example.apktranslatorpro.data.local.UserGlossaryEntity
 import com.example.apktranslatorpro.data.repository.InspectedApkSession
 import com.example.apktranslatorpro.domain.model.ApkMetadata
 import com.example.apktranslatorpro.domain.model.LanguageOption
@@ -27,22 +34,29 @@ import com.example.apktranslatorpro.domain.model.OnlineApiConfig
 import com.example.apktranslatorpro.domain.model.OutputApkResult
 import com.example.apktranslatorpro.domain.model.PipelineStage
 import com.example.apktranslatorpro.domain.model.ResourceEntryItem
+import com.example.apktranslatorpro.domain.model.ResourceKind
 import com.example.apktranslatorpro.domain.model.TranslationMode
 import com.example.apktranslatorpro.domain.model.TranslationOrigin
 import com.example.ui.theme.AppThemeMode
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
 private const val TAG = "MainViewModel"
@@ -80,7 +94,15 @@ data class MainUiState(
     val statusBannerMessage: String? = null,
     val selectedBinaryXmlPath: String = "AndroidManifest.xml",
     val selectedBinaryXmlPreview: String = "",
-    val geminiAnalysisState: GeminiAnalysisUiState = GeminiAnalysisUiState.Idle
+    val geminiAnalysisState: GeminiAnalysisUiState = GeminiAnalysisUiState.Idle,
+    val appIconBitmap: ImageBitmap? = null,
+    val batchApkUris: List<String> = emptyList(),
+    val isBatchRunning: Boolean = false,
+    val batchStatusSummary: String = "",
+    val comparisonApkMetadata: ApkMetadata? = null,
+    val isInspectingComparisonApk: Boolean = false,
+    val backgroundWorkStatus: String = "Hazır",
+    val isBackgroundWorkRunning: Boolean = false
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -89,6 +111,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = app.repository
     private val settingsStore = app.settingsDataStore
     private val recentApkRepository = app.recentApkRepository
+    private val projectRepository = app.projectRepository
     private val mlKitEngine = app.mlKitEngine
     private val onlineEngine = app.onlineEngine
     private val signerEngine = app.signerEngine
@@ -97,15 +120,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
     val settingsState: StateFlow<AppUserSettings> = settingsStore.settingsFlow
+        .catch { emit(AppUserSettings()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppUserSettings())
 
     val cacheCountState: StateFlow<Int> = repository.cacheCountFlow
+        .catch { emit(0) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     val recentJobsState: StateFlow<List<JobHistoryEntity>> = repository.recentJobsFlow
+        .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val recentApksState: StateFlow<List<RecentApkEntity>> = recentApkRepository.recentApksFlow
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val savedProjectsState: StateFlow<List<TranslationProjectEntity>> = projectRepository.projectsFlow
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val userGlossaryState: StateFlow<List<UserGlossaryEntity>> = projectRepository.glossaryFlow
+        .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private var currentSession: InspectedApkSession? = null
@@ -117,14 +152,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         refreshSignerInfo()
         refreshOfflineModels()
+        observeBackgroundWorkSafe()
+    }
+
+    private fun observeBackgroundWorkSafe() {
+        viewModelScope.launch {
+            runCatching {
+                BackgroundTranslationWorker.observeWorkStatus(app).collect { info ->
+                    if (info != null) {
+                        val running = info.state == WorkInfo.State.RUNNING || info.state == WorkInfo.State.ENQUEUED
+                        val label = when (info.state) {
+                            WorkInfo.State.ENQUEUED -> "Kuyrukta bekliyor"
+                            WorkInfo.State.RUNNING -> info.progress.getString(BackgroundTranslationWorker.KEY_STATUS)
+                                ?: "Arka planda çalışıyor..."
+                            WorkInfo.State.SUCCEEDED -> info.outputData.getString(BackgroundTranslationWorker.KEY_STATUS)
+                                ?: "Tamamlandı"
+                            WorkInfo.State.FAILED -> info.outputData.getString(BackgroundTranslationWorker.KEY_STATUS)
+                                ?: "Başarısız"
+                            WorkInfo.State.CANCELLED -> "Duraklatıldı / İptal edildi"
+                            WorkInfo.State.BLOCKED -> "Ağ / Sistem kısıtı bekleniyor"
+                        }
+                        _uiState.update {
+                            it.copy(
+                                isBackgroundWorkRunning = running,
+                                backgroundWorkStatus = label
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun refreshSignerInfo() {
         viewModelScope.launch {
-            runCatching { signerEngine.getOrCreateSignerIdentity() }
-                .onSuccess { identity ->
-                    _uiState.update { it.copy(signerCertSha256 = identity.certSha256) }
-                }
+            runCatching {
+                withContext(Dispatchers.IO) { signerEngine.getOrCreateSignerIdentity() }
+            }.onSuccess { identity ->
+                _uiState.update { it.copy(signerCertSha256 = identity.certSha256) }
+            }
         }
     }
 
@@ -179,6 +245,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 currentSession = session
                 val meta = session.metadata
+                val extractedIcon = runCatching { ApkIconExtractor.extractAppIcon(app, session.workingInputApk) }.getOrNull()
                 recentApkRepository.recordApk(
                     RecentApkEntity(
                         sha256Hex = meta.sha256,
@@ -205,6 +272,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         progress = 0f,
                         progressDetail = "",
                         apkMetadata = session.metadata,
+                        appIconBitmap = extractedIcon,
                         resources = session.resources,
                         selectedSourceLanguage = LanguageOption.AUTO,
                         targetLanguage = defaultTarget,
@@ -557,11 +625,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     onLog = { level, stage, msg -> appendLog(level, stage, msg) }
                 )
 
-                _uiState.update { it.copy(resources = translated) }
+                val glossaryMap = userGlossaryState.value.associate { it.sourceTerm to it.preferredTranslation }
+                val finalTranslated = if (glossaryMap.isEmpty()) {
+                    translated
+                } else {
+                    translated.map { entry ->
+                        if (entry.isLocked || entry.translatedText.isBlank()) entry
+                        else entry.copy(
+                            translatedText = TranslationQualityTools.applyCustomGlossary(entry.translatedText, glossaryMap)
+                        )
+                    }
+                }
+
+                _uiState.update { it.copy(resources = finalTranslated) }
 
                 val result = repository.rebuildSignAndVerifyApk(
                     session = session,
-                    translatedItems = translated,
+                    translatedItems = finalTranslated,
                     sourceLanguage = effectiveSource,
                     targetLanguage = target,
                     outputTreeUriString = settings.outputTreeUri,
@@ -640,8 +720,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateResourceTranslation(uniqueKey: String, newTranslation: String) {
         _uiState.update { current ->
             val updated = current.resources.map { item ->
-                if (item.uniqueKey == uniqueKey) {
+                if (item.uniqueKey == uniqueKey && !item.isLocked) {
                     item.copy(
+                        previousTranslatedText = item.translatedText,
                         translatedText = newTranslation,
                         origin = TranslationOrigin.MANUAL_EDIT
                     )
@@ -650,6 +731,136 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             current.copy(resources = updated)
+        }
+    }
+
+    fun toggleLockEntry(uniqueKey: String) {
+        _uiState.update { current ->
+            val updated = current.resources.map { item ->
+                if (item.uniqueKey == uniqueKey) item.copy(isLocked = !item.isLocked) else item
+            }
+            current.copy(resources = updated)
+        }
+    }
+
+    fun revertToPreviousTranslation(uniqueKey: String) {
+        _uiState.update { current ->
+            val updated = current.resources.map { item ->
+                if (item.uniqueKey == uniqueKey && !item.isLocked && item.previousTranslatedText.isNotBlank()) {
+                    item.copy(
+                        translatedText = item.previousTranslatedText,
+                        previousTranslatedText = item.translatedText,
+                        origin = TranslationOrigin.MANUAL_EDIT
+                    )
+                } else {
+                    item
+                }
+            }
+            current.copy(resources = updated, statusBannerMessage = "Önceki çeviriye dönüldü.")
+        }
+    }
+
+    fun searchAndReplaceTranslations(find: String, replace: String, matchCase: Boolean = false) {
+        if (find.isEmpty()) return
+        var replacedCount = 0
+        _uiState.update { current ->
+            val updated = current.resources.map { item ->
+                if (item.isLocked || item.translatedText.isBlank()) return@map item
+                if (item.translatedText.contains(find, ignoreCase = !matchCase)) {
+                    replacedCount++
+                    val next = item.translatedText.replace(find, replace, ignoreCase = !matchCase)
+                    item.copy(
+                        previousTranslatedText = item.translatedText,
+                        translatedText = next,
+                        origin = TranslationOrigin.MANUAL_EDIT
+                    )
+                } else {
+                    item
+                }
+            }
+            current.copy(
+                resources = updated,
+                statusBannerMessage = "$replacedCount çeviri metninde bul ve değiştir uygulandı."
+            )
+        }
+    }
+
+    fun applyAutoSpellAndPunctuationFix() {
+        var fixedCount = 0
+        val glossary = userGlossaryState.value.associate { it.sourceTerm to it.preferredTranslation }
+        _uiState.update { current ->
+            val updated = current.resources.map { item ->
+                if (item.isLocked || item.translatedText.isBlank()) return@map item
+                var fixed = TranslationQualityTools.autoFixFormatting(item.translatedText)
+                if (glossary.isNotEmpty()) {
+                    fixed = TranslationQualityTools.applyCustomGlossary(fixed, glossary)
+                }
+                if (fixed != item.translatedText) {
+                    fixedCount++
+                    item.copy(
+                        previousTranslatedText = item.translatedText,
+                        translatedText = fixed,
+                        origin = TranslationOrigin.MANUAL_EDIT
+                    )
+                } else {
+                    item
+                }
+            }
+            current.copy(
+                resources = updated,
+                statusBannerMessage = "$fixedCount çeviride yazım, noktalama ve özel sözlük iyileştirildi."
+            )
+        }
+    }
+
+    fun translateSingleOrUntranslatedEntries(onlyKey: String? = null) {
+        val state = _uiState.value
+        val settings = settingsState.value
+        val effectiveSource = if (state.selectedSourceLanguage == LanguageOption.AUTO) {
+            state.apkMetadata?.detectedSourceLanguage ?: LanguageOption.ENGLISH
+        } else {
+            state.selectedSourceLanguage
+        }
+        val target = state.targetLanguage
+        if (effectiveSource == target) {
+            _uiState.update { it.copy(errorMessage = "Kaynak ve hedef dil aynı olamaz.") }
+            return
+        }
+        val targets = if (onlyKey != null) {
+            state.resources.filter { it.uniqueKey == onlyKey && !it.isLocked }
+        } else {
+            state.resources.filter { it.isTranslatable && !it.isLocked && it.translatedText.isBlank() }
+        }
+        if (targets.isEmpty()) {
+            _uiState.update { it.copy(statusBannerMessage = "Çevrilecek bekleyen metin bulunamadı.") }
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                repository.translateResources(
+                    items = targets,
+                    sourceLanguage = effectiveSource,
+                    targetLanguage = target,
+                    mode = settings.translationMode,
+                    onlineConfig = settings.onlineApiConfig,
+                    protectionConfig = settings.protectionConfig,
+                    scopeConfig = settings.resourceScopeConfig.copy(strictStringsOnly = false),
+                    appName = state.apkMetadata?.appLabel ?: "Android App",
+                    packageName = state.apkMetadata?.packageName ?: "com.example.app",
+                    onProgress = { _, _ -> },
+                    onLog = { level, stage, msg -> appendLog(level, stage, msg) }
+                )
+            }.onSuccess { updatedSub ->
+                val byKey = updatedSub.associateBy { it.uniqueKey }
+                _uiState.update { cur ->
+                    cur.copy(
+                        resources = cur.resources.map { item -> byKey[item.uniqueKey] ?: item },
+                        statusBannerMessage = "${updatedSub.size} seçili/eksik metin çevrildi."
+                    )
+                }
+            }.onFailure { err ->
+                _uiState.update { it.copy(errorMessage = "Seçili çeviri hatası: ${err.message}") }
+            }
         }
     }
 
@@ -729,7 +940,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshOfflineModels() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingModels = true) }
-            val states = mlKitEngine.listOfflineModelStates()
+            val states = runCatching {
+                withContext(Dispatchers.IO) { mlKitEngine.listOfflineModelStates() }
+            }.getOrDefault(emptyList())
             _uiState.update { it.copy(offlineModels = states, isLoadingModels = false) }
         }
     }
@@ -799,8 +1012,296 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun enqueueBatchApks(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        uris.forEach { uri ->
+            runCatching {
+                app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
+        val combined = (_uiState.value.batchApkUris + uris.map { it.toString() }).distinct()
+        _uiState.update {
+            it.copy(
+                batchApkUris = combined,
+                batchStatusSummary = "${combined.size} APK toplu içe aktarma kuyruğunda hazır.",
+                statusBannerMessage = "${uris.size} APK toplu kuyruğa eklendi."
+            )
+        }
+    }
+
+    fun runBatchApks(isAuthenticatedUser: Boolean = false) {
+        val uris = _uiState.value.batchApkUris
+        if (uris.isEmpty()) return
+        val settings = settingsState.value
+        val target = _uiState.value.targetLanguage
+        if (!isAuthenticatedUser && settings.isGuestTrialActive && settings.isGuestTrialLimitReached) {
+            _uiState.update { it.copy(errorMessage = "Deneme sınırına ulaşıldı. Toplu işlem için Google ile giriş yapın.") }
+            return
+        }
+        activeJob?.cancel()
+        activeJob = viewModelScope.launch {
+            _uiState.update { it.copy(isBatchRunning = true, isRunning = true, progress = 0.05f) }
+            var successCount = 0
+            uris.forEachIndexed { idx, uriStr ->
+                _uiState.update {
+                    it.copy(
+                        stage = PipelineStage.ANALYZING_APK,
+                        progress = idx.toFloat() / uris.size.toFloat(),
+                        progressDetail = "Toplu APK (${idx + 1}/${uris.size}) işleniyor...",
+                        batchStatusSummary = "İşleniyor: ${idx + 1}/${uris.size}"
+                    )
+                }
+                runCatching {
+                    val session = repository.inspectApkFromUri(Uri.parse(uriStr)) { l, s, m -> appendLog(l, s, m) }
+                    val src = session.metadata.detectedSourceLanguage
+                    val effTarget = if (src == target) LanguageOption.ENGLISH else target
+                    val translated = repository.translateResources(
+                        items = session.resources,
+                        sourceLanguage = src,
+                        targetLanguage = effTarget,
+                        mode = settings.translationMode,
+                        onlineConfig = settings.onlineApiConfig,
+                        protectionConfig = settings.protectionConfig,
+                        scopeConfig = settings.resourceScopeConfig,
+                        appName = session.metadata.appLabel,
+                        packageName = session.metadata.packageName,
+                        onProgress = { _, _ -> },
+                        onLog = { l, s, m -> appendLog(l, s, m) }
+                    )
+                    repository.rebuildSignAndVerifyApk(
+                        session = session,
+                        translatedItems = translated,
+                        sourceLanguage = src,
+                        targetLanguage = effTarget,
+                        outputTreeUriString = settings.outputTreeUri,
+                        scopeConfig = settings.resourceScopeConfig,
+                        onStage = { },
+                        onLog = { l, s, m -> appendLog(l, s, m) }
+                    )
+                    successCount++
+                }.onFailure { err ->
+                    appendLog(LogLevel.ERROR, PipelineStage.ERROR, "Toplu APK hatası (#${idx + 1}): ${err.message}")
+                }
+            }
+            _uiState.update {
+                it.copy(
+                    isBatchRunning = false,
+                    isRunning = false,
+                    stage = PipelineStage.COMPLETED,
+                    progress = 1f,
+                    batchStatusSummary = "Toplu işlem tamamlandı: $successCount / ${uris.size} APK imzalandı.",
+                    statusBannerMessage = "$successCount / ${uris.size} APK toplu olarak çevrildi ve imzalandı."
+                )
+            }
+        }
+    }
+
+    fun inspectComparisonApk(uri: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isInspectingComparisonApk = true, errorMessage = null) }
+            runCatching { repository.inspectComparisonMetadataOnly(uri) }
+                .onSuccess { meta ->
+                    _uiState.update {
+                        it.copy(
+                            isInspectingComparisonApk = false,
+                            comparisonApkMetadata = meta,
+                            statusBannerMessage = "Karşılaştırma APK'sı yüklendi: ${meta.appLabel} (${meta.versionName})"
+                        )
+                    }
+                }
+                .onFailure { err ->
+                    _uiState.update {
+                        it.copy(
+                            isInspectingComparisonApk = false,
+                            errorMessage = "Karşılaştırma APK'sı okunamadı: ${err.message}"
+                        )
+                    }
+                }
+        }
+    }
+
+    fun saveCurrentAsProject(projectName: String, profileName: String = "Standart Uygulama") {
+        val meta = _uiState.value.apkMetadata
+        if (meta == null) {
+            _uiState.update { it.copy(errorMessage = "Proje kaydetmek için önce bir APK seçin.") }
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val resources = _uiState.value.resources
+            val serialized = serializeResourcesToJson(resources)
+            val entity = TranslationProjectEntity(
+                projectId = UUID.randomUUID().toString(),
+                projectName = projectName.ifBlank { "${meta.appLabel} (${meta.versionName})" },
+                packageName = meta.packageName,
+                apkFileName = meta.fileName,
+                sourceApkUri = meta.uriString,
+                sourceSha256 = meta.sha256,
+                sourceLangCode = _uiState.value.selectedSourceLanguage.code,
+                targetLangCode = _uiState.value.targetLanguage.code,
+                profileName = profileName.ifBlank { "Standart Uygulama" },
+                serializedResourcesJson = serialized,
+                entryCount = resources.size,
+                translatedCount = resources.count { it.translatedText.isNotBlank() }
+            )
+            projectRepository.saveProject(entity)
+            _uiState.update { it.copy(statusBannerMessage = "Proje kaydedildi: ${entity.projectName}") }
+        }
+    }
+
+    fun loadSavedProject(projectId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val proj = projectRepository.getProject(projectId) ?: return@launch
+            val loadedResources = deserializeResourcesFromJson(proj.serializedResourcesJson)
+            _uiState.update {
+                it.copy(
+                    selectedApkUri = proj.sourceApkUri,
+                    selectedSourceLanguage = LanguageOption.fromCode(proj.sourceLangCode),
+                    targetLanguage = LanguageOption.fromCode(proj.targetLangCode),
+                    resources = loadedResources,
+                    statusBannerMessage = "Proje yüklendi: ${proj.projectName} (${loadedResources.size} metin)"
+                )
+            }
+        }
+    }
+
+    fun duplicateSavedProject(projectId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val orig = projectRepository.getProject(projectId) ?: return@launch
+            projectRepository.saveProject(
+                orig.copy(
+                    projectId = UUID.randomUUID().toString(),
+                    projectName = "${orig.projectName} (Kopya)",
+                    updatedAtMillis = System.currentTimeMillis()
+                )
+            )
+            _uiState.update { it.copy(statusBannerMessage = "Proje çoğaltıldı.") }
+        }
+    }
+
+    fun deleteSavedProject(projectId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            projectRepository.deleteProject(projectId)
+            _uiState.update { it.copy(statusBannerMessage = "Proje silindi.") }
+        }
+    }
+
+    fun addGlossaryTerm(source: String, target: String, note: String = "Özel Sözlük") {
+        viewModelScope.launch(Dispatchers.IO) {
+            projectRepository.saveGlossaryTerm(source, target, note)
+            _uiState.update { it.copy(statusBannerMessage = "Özel sözlük terimi eklendi: $source → $target") }
+        }
+    }
+
+    fun deleteGlossaryTerm(source: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            projectRepository.deleteGlossaryTerm(source)
+        }
+    }
+
+    fun exportReportContent(format: String): String {
+        val pkg = _uiState.value.apkMetadata?.packageName ?: "com.example.app"
+        val items = _uiState.value.resources
+        return when (format.lowercase()) {
+            "json" -> TranslationQualityTools.exportAsJson(pkg, items)
+            "csv" -> TranslationQualityTools.exportAsCsv(items)
+            else -> ValuesXmlCodec.generateStringsXml(items, useTranslated = true)
+        }
+    }
+
+    fun writeTextExportToUri(targetUri: Uri, content: String, label: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                app.contentResolver.openOutputStream(targetUri)?.use { out ->
+                    out.write(content.toByteArray(Charsets.UTF_8))
+                } ?: throw IllegalStateException("Hedef akış açılamadı.")
+            }.onSuccess {
+                _uiState.update { it.copy(statusBannerMessage = "$label dosyası dışa aktarıldı.") }
+            }.onFailure { err ->
+                _uiState.update { it.copy(errorMessage = "Dışa aktarma hatası: ${err.message}") }
+            }
+        }
+    }
+
+    fun enqueueBackgroundWorkManagerBuild() {
+        val uriStr = _uiState.value.selectedApkUri
+        if (uriStr.isNullOrBlank()) {
+            _uiState.update { it.copy(errorMessage = "Arka plan görevi için önce bir APK seçin.") }
+            return
+        }
+        val needsNet = settingsState.value.translationMode != TranslationMode.OFFLINE_ONLY
+        runCatching {
+            BackgroundTranslationWorker.enqueueOneClickBuild(
+                context = app,
+                apkUriString = uriStr,
+                targetLangCode = _uiState.value.targetLanguage.code,
+                requireNetwork = needsNet
+            )
+        }.onSuccess {
+            _uiState.update {
+                it.copy(
+                    isBackgroundWorkRunning = true,
+                    backgroundWorkStatus = "WorkManager arka plan görevi kuyruğa alındı",
+                    statusBannerMessage = "Tek tıklamayla WorkManager arka plan derlemesi başlatıldı."
+                )
+            }
+        }.onFailure { err ->
+            _uiState.update { it.copy(errorMessage = "WorkManager başlatılamadı: ${err.message}") }
+        }
+    }
+
+    fun cancelBackgroundWorkManagerBuild() {
+        runCatching { BackgroundTranslationWorker.cancelBackgroundBuild(app) }
+        _uiState.update {
+            it.copy(
+                isBackgroundWorkRunning = false,
+                backgroundWorkStatus = "Duraklatıldı / İptal edildi",
+                statusBannerMessage = "WorkManager arka plan görevi durduruldu."
+            )
+        }
+    }
+
     fun dismissMessages() {
         _uiState.update { it.copy(errorMessage = null, statusBannerMessage = null) }
+    }
+
+    private fun serializeResourcesToJson(items: List<ResourceEntryItem>): String {
+        val arr = JSONArray()
+        items.take(800).forEach { item ->
+            arr.put(
+                JSONObject().apply {
+                    put("id", item.id)
+                    put("kind", item.kind.name)
+                    put("key", item.key)
+                    put("subKey", item.subKey)
+                    put("locale", item.localeQualifier)
+                    put("orig", item.originalText)
+                    put("tr", item.translatedText)
+                    put("locked", item.isLocked)
+                }
+            )
+        }
+        return arr.toString()
+    }
+
+    private fun deserializeResourcesFromJson(jsonStr: String): List<ResourceEntryItem> {
+        return runCatching {
+            val arr = JSONArray(jsonStr)
+            (0 until arr.length()).map { idx ->
+                val obj = arr.getJSONObject(idx)
+                ResourceEntryItem(
+                    id = obj.optInt("id", idx),
+                    kind = runCatching { ResourceKind.valueOf(obj.optString("kind", "STRING")) }
+                        .getOrDefault(ResourceKind.STRING),
+                    key = obj.optString("key", ""),
+                    subKey = obj.optString("subKey", ""),
+                    localeQualifier = obj.optString("locale", "default"),
+                    originalText = obj.optString("orig", ""),
+                    translatedText = obj.optString("tr", ""),
+                    isLocked = obj.optBoolean("locked", false),
+                    origin = if (obj.optString("tr").isNotBlank()) TranslationOrigin.MANUAL_EDIT else TranslationOrigin.PENDING
+                )
+            }
+        }.getOrDefault(emptyList())
     }
 
     private fun appendLog(level: LogLevel, stage: PipelineStage, message: String) {

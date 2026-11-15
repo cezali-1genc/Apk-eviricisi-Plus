@@ -1,10 +1,16 @@
 package com.example.apktranslatorpro.ui
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
+import android.content.res.AssetManager
 import android.content.res.Configuration
+import android.content.res.Resources
 import android.net.Uri
 import android.provider.Settings
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -43,6 +49,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ProvidedValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,10 +99,13 @@ import com.example.apktranslatorpro.ui.viewmodel.BuildProcessStep
 import com.example.apktranslatorpro.ui.viewmodel.BuildProcessViewModel
 import com.example.apktranslatorpro.ui.viewmodel.CloudSyncViewModel
 import com.example.apktranslatorpro.ui.viewmodel.FilePickerViewModel
+import com.example.apktranslatorpro.ui.viewmodel.GitViewModel
 import com.example.apktranslatorpro.ui.viewmodel.LanguageManagerViewModel
 import com.example.apktranslatorpro.ui.viewmodel.MainViewModel
 import com.example.ui.theme.ApkTranslatorProTheme
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -130,18 +140,40 @@ private data class TopDestination<T : Any>(
 @Composable
 fun ApkTranslatorRoot(
     viewModel: MainViewModel,
-    auth: FirebaseAuth = remember { FirebaseAuth.getInstance() }
+    auth: FirebaseAuth? = null
 ) {
     val settings by viewModel.settingsState.collectAsStateWithLifecycle()
-    val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
+    val baseContext = LocalContext.current
+    val activityContext = remember(baseContext) { baseContext.findActivity() ?: baseContext }
+    val resolvedAuth = remember(auth, baseContext) {
+        auth ?: runCatching {
+            if (FirebaseApp.getApps(baseContext).isEmpty()) {
+                FirebaseApp.initializeApp(baseContext)
+            }
+            FirebaseAuth.getInstance()
+        }.getOrNull()
+    }
+    val currentUser by remember(resolvedAuth) {
+        resolvedAuth?.authStateFlow() ?: flowOf(null)
+    }.collectAsStateWithLifecycle(initialValue = resolvedAuth?.currentUser)
     var showSplash by rememberSaveable { mutableStateOf(true) }
 
-    val baseContext = LocalContext.current
     val localizedContext = remember(baseContext, settings.appUiLanguage) {
         applyUiLocale(baseContext, settings.appUiLanguage)
     }
+    val activityResultRegistryOwner = LocalActivityResultRegistryOwner.current
+    val onBackPressedDispatcherOwner = LocalOnBackPressedDispatcherOwner.current
+    val providedValues = buildList<ProvidedValue<*>> {
+        add(LocalContext provides localizedContext)
+        if (activityResultRegistryOwner != null) {
+            add(LocalActivityResultRegistryOwner provides activityResultRegistryOwner)
+        }
+        if (onBackPressedDispatcherOwner != null) {
+            add(LocalOnBackPressedDispatcherOwner provides onBackPressedDispatcherOwner)
+        }
+    }
 
-    CompositionLocalProvider(LocalContext provides localizedContext) {
+    CompositionLocalProvider(*providedValues.toTypedArray()) {
         ApkTranslatorProTheme(themeMode = settings.themeMode) {
             if (showSplash) {
                 SplashScreen(onFinished = { showSplash = false })
@@ -150,20 +182,22 @@ fun ApkTranslatorRoot(
                 val canEnterGuest = settings.isGuestTrialActive && !settings.isGuestTrialLimitReached
                 when {
                     user != null -> {
-                        val cloudViewModel: CloudSyncViewModel = viewModel(
-                            key = user.uid,
-                            factory = viewModelFactory {
-                                initializer {
-                                    val app = checkNotNull(this[APPLICATION_KEY])
-                                    CloudSyncViewModel(
-                                        syncRepository = FirestoreSyncRepository(app.applicationContext),
-                                        currentUserId = user.uid,
-                                        userDisplayName = user.displayName ?: user.email ?: "Cezalı 1Genç Kullanıcısı",
-                                        userEmail = user.email
-                                    )
+                        val cloudViewModel: CloudSyncViewModel? = runCatching {
+                            viewModel<CloudSyncViewModel>(
+                                key = user.uid,
+                                factory = viewModelFactory {
+                                    initializer {
+                                        val app = checkNotNull(this[APPLICATION_KEY])
+                                        CloudSyncViewModel(
+                                            syncRepository = FirestoreSyncRepository(app.applicationContext),
+                                            currentUserId = user.uid,
+                                            userDisplayName = user.displayName ?: user.email ?: "Cezalı 1Genç Kullanıcısı",
+                                            userEmail = user.email
+                                        )
+                                    }
                                 }
-                            }
-                        )
+                            )
+                        }.getOrNull()
                         AuthenticatedAppShell(
                             viewModel = viewModel,
                             cloudViewModel = cloudViewModel,
@@ -183,6 +217,7 @@ fun ApkTranslatorRoot(
                     }
                     else -> {
                         AuthScreen(
+                            activityContext = activityContext,
                             selectedAppLanguage = settings.appUiLanguage,
                             guestTranslationsUsed = settings.guestTranslationsUsed,
                             onSelectAppLanguage = viewModel::setAppUiLanguage,
@@ -207,15 +242,19 @@ fun AuthenticatedAppShell(
     val filePickerViewModel: FilePickerViewModel = viewModel(factory = FilePickerViewModel.Factory)
     val buildProcessViewModel: BuildProcessViewModel = viewModel(factory = BuildProcessViewModel.Factory)
     val languageManagerViewModel: LanguageManagerViewModel = viewModel(factory = LanguageManagerViewModel.Factory)
+    val gitViewModel: GitViewModel = viewModel(factory = GitViewModel.Factory)
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val filePickerState by filePickerViewModel.state.collectAsStateWithLifecycle()
     val buildState by buildProcessViewModel.state.collectAsStateWithLifecycle()
     val langManagerState by languageManagerViewModel.state.collectAsStateWithLifecycle()
+    val gitState by gitViewModel.state.collectAsStateWithLifecycle()
     val settings by viewModel.settingsState.collectAsStateWithLifecycle()
     val cacheCount by viewModel.cacheCountState.collectAsStateWithLifecycle()
     val recentJobs by viewModel.recentJobsState.collectAsStateWithLifecycle()
     val recentApks by viewModel.recentApksState.collectAsStateWithLifecycle()
+    val savedProjects by viewModel.savedProjectsState.collectAsStateWithLifecycle()
+    val userGlossary by viewModel.userGlossaryState.collectAsStateWithLifecycle()
 
     val cloudProjectsState = cloudViewModel?.cloudProjectsState?.collectAsStateWithLifecycle()?.value
         ?: com.example.apktranslatorpro.ui.viewmodel.CloudProjectsUiState.Success(emptyList())
@@ -228,6 +267,7 @@ fun AuthenticatedAppShell(
 
     var lastRecordedInputSha by remember { mutableStateOf<String?>(null) }
     var lastRecordedOutputSha by remember { mutableStateOf<String?>(null) }
+    var requestedToolsModuleId by remember { mutableStateOf<String?>(null) }
 
     // Keep GlobalBuildProgressBar synchronized with MainViewModel pipeline progress
     LaunchedEffect(uiState.isRunning, uiState.isInspecting, uiState.stage, uiState.progress, uiState.progressDetail) {
@@ -288,6 +328,18 @@ fun AuthenticatedAppShell(
         viewModel.onApkSelected(uri)
     }
 
+    val pickBatchApksLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            viewModel.enqueueBatchApks(uris)
+        }
+    }
+
+    val pickComparisonApkLauncher = rememberApkSafPickerLauncher { uri ->
+        viewModel.inspectComparisonApk(uri)
+    }
+
     val pickOutputFolderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { treeUri ->
@@ -313,7 +365,9 @@ fun AuthenticatedAppShell(
         buildState.statusMessage,
         buildState.errorMessage,
         langManagerState.statusMessage,
-        langManagerState.errorMessage
+        langManagerState.errorMessage,
+        gitState.statusMessage,
+        gitState.errorMessage
     ) {
         val msg = uiState.errorMessage
             ?: uiState.statusBannerMessage
@@ -321,12 +375,15 @@ fun AuthenticatedAppShell(
             ?: buildState.statusMessage
             ?: langManagerState.errorMessage
             ?: langManagerState.statusMessage
+            ?: gitState.errorMessage
+            ?: gitState.statusMessage
             ?: cloudSyncMessage
         if (!msg.isNullOrBlank()) {
             snackbarHostState.showSnackbar(msg)
             viewModel.dismissMessages()
             buildProcessViewModel.clearBanner()
             languageManagerViewModel.clearMessages()
+            gitViewModel.clearMessages()
             cloudViewModel?.clearSyncMessage()
         }
     }
@@ -489,6 +546,12 @@ fun AuthenticatedAppShell(
                             uiState = uiState,
                             settings = settings,
                             onPickApkClick = launchApkPicker,
+                            onPickBatchApksClick = {
+                                pickBatchApksLauncher.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream", "*/*"))
+                            },
+                            onRunBatchApksClick = {
+                                viewModel.runBatchApks(isAuthenticatedUser = !isGuestMode)
+                            },
                             onVerifySafExistenceClick = {
                                 filePickerViewModel.recalculateChecksum()
                                 viewModel.verifySelectedSafFileIntegrity()
@@ -503,6 +566,7 @@ fun AuthenticatedAppShell(
                             onStartPipelineClick = {
                                 viewModel.requestStartPipeline(isAuthenticatedUser = !isGuestMode)
                             },
+                            onStartBackgroundWorkClick = viewModel::enqueueBackgroundWorkManagerBuild,
                             onCancelPipelineClick = viewModel::cancelActivePipeline,
                             onConfirmOnlineConsent = {
                                 viewModel.confirmOnlineConsentAndStart(isAuthenticatedUser = !isGuestMode)
@@ -534,10 +598,17 @@ fun AuthenticatedAppShell(
                             uiState = uiState,
                             filePickerState = filePickerState,
                             buildState = buildState,
+                            gitState = gitState,
                             recentApks = recentApks,
+                            savedProjects = savedProjects,
+                            userGlossary = userGlossary,
+                            userDisplayName = userDisplayName,
                             themeMode = settings.themeMode,
                             cloudProjectsState = cloudProjectsState,
+                            requestedModuleId = requestedToolsModuleId,
+                            onConsumeRequestedModule = { requestedToolsModuleId = null },
                             onPickApkClick = launchApkPicker,
+                            onPickComparisonApkClick = { pickComparisonApkLauncher.launchApkDocumentPicker() },
                             onVerifySafIntegrityClick = {
                                 filePickerViewModel.recalculateChecksum()
                                 viewModel.verifySelectedSafFileIntegrity()
@@ -559,6 +630,7 @@ fun AuthenticatedAppShell(
                             onExportWorkspaceZip = { targetUri ->
                                 buildProcessViewModel.exportWorkspaceZip(targetUri)
                             },
+                            onExportTextToUri = viewModel::writeTextExportToUri,
                             onRegenerateSignerKey = viewModel::regenerateSignerKey,
                             onDeleteRecentApk = viewModel::deleteRecentApk,
                             onClearRecentApks = viewModel::clearRecentApks,
@@ -570,7 +642,29 @@ fun AuthenticatedAppShell(
                             onDeleteCloudProject = { projId ->
                                 cloudViewModel?.deleteCloudProject(projId)
                             },
-                            onOpenBinaryXmlTab = { navigateTo(PreviewRoute) }
+                            onOpenBinaryXmlTab = { navigateTo(PreviewRoute) },
+                            onSaveProjectClick = viewModel::saveCurrentAsProject,
+                            onLoadProjectClick = viewModel::loadSavedProject,
+                            onDuplicateProjectClick = viewModel::duplicateSavedProject,
+                            onDeleteProjectClick = viewModel::deleteSavedProject,
+                            onAddGlossaryTerm = viewModel::addGlossaryTerm,
+                            onDeleteGlossaryTerm = viewModel::deleteGlossaryTerm,
+                            onStartWorkManagerClick = viewModel::enqueueBackgroundWorkManagerBuild,
+                            onCancelWorkManagerClick = viewModel::cancelBackgroundWorkManagerBuild,
+                            onGitUrlChanged = gitViewModel::updateRepoUrl,
+                            onGitBranchChanged = gitViewModel::updateBranchInput,
+                            onGitPatChanged = gitViewModel::updatePatToken,
+                            onGitProbeRefs = gitViewModel::probeRemoteRefs,
+                            onGitClone = gitViewModel::cloneRepository,
+                            onGitSelectRepo = gitViewModel::selectActiveRepo,
+                            onGitInspectDiff = gitViewModel::inspectDiffForFile,
+                            onGitExportStrings = {
+                                val xml = viewModel.exportReportContent("xml")
+                                gitViewModel.exportTranslatedStringsToActiveRepo(uiState.targetLanguage.code, xml)
+                            },
+                            onGitCommit = gitViewModel::commitLocalChanges,
+                            onGitPushFile = gitViewModel::pushFileToGitHub,
+                            onGitDeleteRepo = gitViewModel::deleteActiveRepo
                         )
                     }
 
@@ -579,6 +673,19 @@ fun AuthenticatedAppShell(
                             uiState = uiState,
                             generateXmlPreview = viewModel::generateStringsXmlPreview,
                             onEditTranslation = viewModel::updateResourceTranslation,
+                            onToggleLockEntry = viewModel::toggleLockEntry,
+                            onRevertEntry = viewModel::revertToPreviousTranslation,
+                            onSearchAndReplace = viewModel::searchAndReplaceTranslations,
+                            onAutoSpellFixClick = viewModel::applyAutoSpellAndPunctuationFix,
+                            onTranslateMissingClick = viewModel::translateSingleOrUntranslatedEntries,
+                            onExportReportUri = { uri, fmt ->
+                                val content = viewModel.exportReportContent(fmt)
+                                viewModel.writeTextExportToUri(uri, content, fmt.uppercase())
+                            },
+                            onOpenSideBySideXmlDiff = {
+                                requestedToolsModuleId = "xml_diff"
+                                navigateTo(ApkToolsRoute)
+                            },
                             onSelectBinaryXml = viewModel::inspectBinaryXmlEntry,
                             onRebuildWithEditsClick = {
                                 viewModel.rebuildApkFromCurrentPreview()
@@ -675,11 +782,32 @@ fun AuthenticatedAppShell(
     }
 }
 
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+private class LocalizedContextWrapper(
+    base: Context,
+    private val localizedResources: Resources,
+    private val localizedAssets: AssetManager
+) : ContextWrapper(base) {
+    override fun getResources(): Resources = localizedResources
+    override fun getAssets(): AssetManager = localizedAssets
+}
+
 private fun applyUiLocale(base: Context, language: AppUiLanguage): Context {
     val locale = Locale.forLanguageTag(language.code)
     val config = Configuration(base.resources.configuration)
     config.setLocale(locale)
-    return base.createConfigurationContext(config)
+    val configContext = runCatching { base.createConfigurationContext(config) }.getOrNull()
+        ?: return base
+    return LocalizedContextWrapper(
+        base = base,
+        localizedResources = configContext.resources,
+        localizedAssets = configContext.assets
+    )
 }
 
 private fun launchApkInstaller(context: Context, output: OutputApkResult): String? {

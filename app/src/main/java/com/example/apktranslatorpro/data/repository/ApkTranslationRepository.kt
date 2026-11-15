@@ -182,6 +182,63 @@ class ApkTranslationRepository(
             packager.decodeBinaryXmlEntry(session.workingInputApk, entryPath)
         }
 
+    suspend fun inspectComparisonMetadataOnly(uri: Uri): ApkMetadata = withContext(Dispatchers.IO) {
+        val safCheck = ApkSecurityUtils.verifySafApkExistsReadOnly(context, uri)
+        val compareDir = File(context.cacheDir, "apk_compare_temp").apply {
+            if (exists()) deleteRecursively()
+            mkdirs()
+        }
+        val copyFile = File(compareDir, "compare_readonly.apk")
+        try {
+            val stream = context.contentResolver.openInputStream(uri)
+                ?: throw SecurityException("Karşılaştırılacak APK açılamadı.")
+            stream.use { inp ->
+                FileOutputStream(copyFile).use { out -> inp.copyTo(out, 16 * 1024) }
+            }
+            val analyzed = packager.analyzeApk(copyFile)
+            val label = packager.resolveAppLabel(analyzed.manifestInfo, analyzed.arscTable)
+            val locales = analyzed.arscTable.extractLocales()
+            val fullInspection = ApkToolkitInspector.inspectFullApk(
+                apkFile = copyFile,
+                manifestInfo = analyzed.manifestInfo,
+                sha256Hex = safCheck.sha256Hex
+            )
+            val sampleTexts = analyzed.extractedResources
+                .asSequence()
+                .filter { it.isTranslatable && it.originalText.length >= 4 }
+                .map { it.originalText }
+                .take(25)
+                .toList()
+            val (detectedLang, confidence) = mlKitEngine.detectLanguage(sampleTexts)
+            ApkMetadata(
+                fileName = safCheck.displayName,
+                uriString = uri.toString(),
+                fileSizeBytes = copyFile.length(),
+                sha256 = safCheck.sha256Hex,
+                packageName = analyzed.manifestInfo.packageName,
+                appLabel = label,
+                versionName = analyzed.manifestInfo.versionName,
+                versionCode = analyzed.manifestInfo.versionCode,
+                minSdkVersion = analyzed.manifestInfo.minSdkVersion,
+                targetSdkVersion = analyzed.manifestInfo.targetSdkVersion,
+                supportsRtl = analyzed.manifestInfo.supportsRtl,
+                detectedSourceLanguage = detectedLang,
+                detectedConfidence = confidence,
+                availableLocales = locales,
+                totalStringCount = analyzed.extractedResources.count { it.kind == ResourceKind.STRING },
+                totalArrayItemCount = analyzed.extractedResources.count { it.kind == ResourceKind.STRING_ARRAY },
+                totalPluralItemCount = analyzed.extractedResources.count { it.kind == ResourceKind.PLURALS },
+                hasExistingSignature = analyzed.hasExistingSignature,
+                securityWarnings = analyzed.securityWarnings,
+                manifestXmlPreview = analyzed.manifestInfo.xmlPreview,
+                binaryXmlFiles = analyzed.binaryXmlFiles,
+                fullInspection = fullInspection
+            )
+        } finally {
+            compareDir.deleteRecursively()
+        }
+    }
+
     suspend fun translateResources(
         items: List<ResourceEntryItem>,
         sourceLanguage: LanguageOption,
@@ -235,7 +292,7 @@ class ApkTranslationRepository(
             for (index in resultList.indices) {
                 currentCoroutineContext().ensureActive()
                 val item = resultList[index]
-                if (item.origin == TranslationOrigin.MANUAL_EDIT && item.translatedText.isNotBlank()) {
+                if (item.isLocked || (item.origin == TranslationOrigin.MANUAL_EDIT && item.translatedText.isNotBlank())) {
                     onProgress(index + 1, total)
                     continue
                 }
@@ -335,7 +392,7 @@ class ApkTranslationRepository(
                 currentCoroutineContext().ensureActive()
                 val item = resultList[index]
 
-                if (item.origin == TranslationOrigin.MANUAL_EDIT && item.translatedText.isNotBlank()) {
+                if (item.isLocked || (item.origin == TranslationOrigin.MANUAL_EDIT && item.translatedText.isNotBlank())) {
                     onProgress(index + 1, total)
                     continue
                 }

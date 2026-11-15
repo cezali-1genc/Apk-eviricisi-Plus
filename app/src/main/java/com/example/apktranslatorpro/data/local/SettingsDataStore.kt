@@ -2,9 +2,11 @@ package com.example.apktranslatorpro.data.local
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -16,10 +18,13 @@ import com.example.apktranslatorpro.domain.model.OnlineProviderPreset
 import com.example.apktranslatorpro.domain.model.TranslationMode
 import com.example.ui.theme.AppThemeMode
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import java.io.IOException
 
 private val Context.appSettingsDataStore: DataStore<Preferences> by preferencesDataStore(
-    name = "apk_translator_settings"
+    name = "apk_translator_settings",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
 )
 
 enum class AppUiLanguage(val code: String, val label: String) {
@@ -79,7 +84,11 @@ class SettingsDataStore(
         val TRANSLATE_VALUES_EN = booleanPreferencesKey("translate_values_en")
     }
 
-    val settingsFlow: Flow<AppUserSettings> = context.appSettingsDataStore.data.map { prefs ->
+    val settingsFlow: Flow<AppUserSettings> = context.appSettingsDataStore.data
+        .catch { ex ->
+            if (ex is IOException) emit(emptyPreferences()) else throw ex
+        }
+        .map { prefs ->
         val theme = prefs[Keys.THEME_MODE]?.let { runCatching { AppThemeMode.valueOf(it) }.getOrNull() }
             ?: AppThemeMode.SYSTEM
         val uiLang = prefs[Keys.APP_UI_LANGUAGE]?.let { runCatching { AppUiLanguage.valueOf(it) }.getOrNull() }

@@ -1,5 +1,8 @@
 package com.example.apktranslatorpro.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -22,9 +25,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -35,6 +42,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
@@ -57,6 +65,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import com.example.apktranslatorpro.core.text.TranslationQualityTools
+import com.example.apktranslatorpro.domain.model.ResourceCategory
 import com.example.apktranslatorpro.domain.model.ResourceEntryItem
 import com.example.apktranslatorpro.domain.model.ResourceKind
 import com.example.apktranslatorpro.domain.model.TranslationOrigin
@@ -68,7 +78,8 @@ private enum class PreviewFilter(val labelTr: String) {
     STRINGS("Metinler"),
     ARRAYS("Diziler"),
     PLURALS("Çoğullar"),
-    TRANSLATED("Çevrilenler")
+    TRANSLATED("Çevrilenler"),
+    UNTRANSLATED("Çevrilmeyen")
 }
 
 private enum class PreviewMode(val labelTr: String) {
@@ -83,19 +94,43 @@ fun PreviewScreen(
     uiState: MainUiState,
     generateXmlPreview: (Boolean) -> String,
     onEditTranslation: (uniqueKey: String, newText: String) -> Unit,
+    onToggleLockEntry: (uniqueKey: String) -> Unit = {},
+    onRevertEntry: (uniqueKey: String) -> Unit = {},
+    onSearchAndReplace: (find: String, replace: String, matchCase: Boolean) -> Unit = { _, _, _ -> },
+    onAutoSpellFixClick: () -> Unit = {},
+    onTranslateMissingClick: (onlyKey: String?) -> Unit = {},
+    onExportReportUri: (Uri, String) -> Unit = { _, _ -> },
+    onOpenSideBySideXmlDiff: () -> Unit = {},
     onSelectBinaryXml: (entryPath: String) -> Unit,
     onRebuildWithEditsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(PreviewFilter.ALL) }
+    var selectedCategory by remember { mutableStateOf<ResourceCategory?>(null) }
     var viewMode by remember { mutableStateOf(PreviewMode.LIST) }
     var editingItem by remember { mutableStateOf<ResourceEntryItem?>(null) }
     var editDraft by remember { mutableStateOf("") }
     var xmlDropdownExpanded by remember { mutableStateOf(false) }
+    var showSearchReplaceDialog by remember { mutableStateOf(false) }
+    var pendingExportFormat by remember { mutableStateOf("json") }
+
+    val exportDocLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("*/*")
+    ) { uri ->
+        if (uri != null) onExportReportUri(uri, pendingExportFormat)
+    }
+
+    if (showSearchReplaceDialog) {
+        SearchAndReplaceDialog(
+            onDismiss = { showSearchReplaceDialog = false },
+            onApply = onSearchAndReplace
+        )
+    }
 
     if (editingItem != null) {
         val current = editingItem!!
+        val suggestions = remember(current) { TranslationQualityTools.suggestAlternatives(current) }
         AlertDialog(
             onDismissRequest = { editingItem = null },
             title = { Text("Çeviriyi Düzenle: ${current.key}") },
@@ -123,6 +158,18 @@ fun PreviewScreen(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
+                    }
+                    if (suggestions.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            suggestions.forEach { alt ->
+                                AssistChip(onClick = { editDraft = alt }, label = { Text(alt, maxLines = 1) })
+                            }
+                        }
                     }
                     OutlinedTextField(
                         value = editDraft,
@@ -186,7 +233,7 @@ fun PreviewScreen(
             return@Box
         }
 
-        val filtered = remember(uiState.resources, searchQuery, filter) {
+        val filtered = remember(uiState.resources, searchQuery, filter, selectedCategory) {
             val q = searchQuery.trim().lowercase()
             uiState.resources.filter { item ->
                 val matchesFilter = when (filter) {
@@ -195,12 +242,15 @@ fun PreviewScreen(
                     PreviewFilter.ARRAYS -> item.kind == ResourceKind.STRING_ARRAY
                     PreviewFilter.PLURALS -> item.kind == ResourceKind.PLURALS
                     PreviewFilter.TRANSLATED -> item.translatedText.isNotBlank()
+                    PreviewFilter.UNTRANSLATED -> item.isTranslatable && item.translatedText.isBlank()
                 }
+                val matchesCat = selectedCategory == null ||
+                    TranslationQualityTools.classifyCategory(item.key, item.originalText) == selectedCategory
                 val matchesSearch = q.isEmpty() ||
                     item.key.lowercase().contains(q) ||
                     item.originalText.lowercase().contains(q) ||
                     item.translatedText.lowercase().contains(q)
-                matchesFilter && matchesSearch
+                matchesFilter && matchesCat && matchesSearch
             }
         }
 
@@ -240,6 +290,20 @@ fun PreviewScreen(
 
             when (viewMode) {
                 PreviewMode.LIST -> {
+                    PreviewToolsPanel(
+                        resources = uiState.resources,
+                        selectedCategory = selectedCategory,
+                        onSelectCategory = { selectedCategory = it },
+                        onOpenSearchReplace = { showSearchReplaceDialog = true },
+                        onAutoSpellFixClick = onAutoSpellFixClick,
+                        onTranslateUntranslatedClick = { onTranslateMissingClick(null) },
+                        onExportFormatClick = { fmt ->
+                            pendingExportFormat = fmt
+                            exportDocLauncher.launch("translations.$fmt")
+                        },
+                        onOpenSideBySideXmlDiff = onOpenSideBySideXmlDiff
+                    )
+
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
@@ -282,9 +346,13 @@ fun PreviewScreen(
                                 item = item,
                                 isTargetRtl = uiState.targetLanguage.isRtl,
                                 onEditClick = {
-                                    editDraft = item.translatedText.ifBlank { item.originalText }
-                                    editingItem = item
-                                }
+                                    if (!item.isLocked) {
+                                        editDraft = item.translatedText.ifBlank { item.originalText }
+                                        editingItem = item
+                                    }
+                                },
+                                onToggleLock = { onToggleLockEntry(item.uniqueKey) },
+                                onRevert = { onRevertEntry(item.uniqueKey) }
                             )
                         }
                     }
@@ -352,8 +420,13 @@ fun PreviewScreen(
 private fun ResourcePreviewCard(
     item: ResourceEntryItem,
     isTargetRtl: Boolean,
-    onEditClick: () -> Unit
+    onEditClick: () -> Unit,
+    onToggleLock: () -> Unit,
+    onRevert: () -> Unit
 ) {
+    val qualityScore = remember(item.translatedText, item.originalText) {
+        TranslationQualityTools.scoreTranslation(item)
+    }
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = MaterialTheme.shapes.small,
@@ -378,25 +451,35 @@ private fun ResourcePreviewCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                Spacer(Modifier.width(8.dp))
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = MaterialTheme.shapes.extraSmall
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (item.previousTranslatedText.isNotBlank() && !item.isLocked) {
+                        IconButton(onClick = onRevert) {
+                            Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Önceki çeviriye dön", modifier = Modifier.height(16.dp))
+                        }
+                    }
+                    IconButton(onClick = onToggleLock) {
                         Icon(
-                            imageVector = Icons.Filled.Edit,
-                            contentDescription = "Düzenle",
-                            modifier = Modifier.height(12.dp)
+                            imageVector = if (item.isLocked) Icons.Filled.Lock else Icons.Filled.LockOpen,
+                            contentDescription = if (item.isLocked) "Kilidi aç" else "Çeviriyi kilitle",
+                            tint = if (item.isLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.height(16.dp)
                         )
-                        Text(
-                            text = item.origin.labelTr,
-                            style = MaterialTheme.typography.labelSmall
-                        )
+                    }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = MaterialTheme.shapes.extraSmall
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Düzenle", modifier = Modifier.height(12.dp))
+                            Text(
+                                text = if (qualityScore > 0) "${item.origin.labelTr} ($qualityScore%)" else item.origin.labelTr,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
                     }
                 }
             }

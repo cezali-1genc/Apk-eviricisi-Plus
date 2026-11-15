@@ -306,45 +306,6 @@ fun ToolkitCodeEditorModuleScreen(
                     }
                 }
 
-                ToolkitModule.MANIFEST_EDITOR -> {
-                    item {
-                        if (workspace == null) {
-                            RequireDecompileCard(
-                                hasApk = uiState.selectedApkUri != null,
-                                isBusy = buildState.isBusy,
-                                onDecompileApk = onDecompileApk
-                            )
-                        } else {
-                            var manifestDraft by remember(workspace.manifestFile) {
-                                mutableStateOf(
-                                    workspace.manifestFile.takeIf { it.exists() }?.readText(Charsets.UTF_8) ?: ""
-                                )
-                            }
-                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Text("AndroidManifest.xml (Önbellek)", style = MaterialTheme.typography.titleMedium)
-                                    OutlinedTextField(
-                                        value = manifestDraft,
-                                        onValueChange = { manifestDraft = it },
-                                        textStyle = TextStyle(fontFamily = JetBrainsMonoFontFamily, fontSize = 12.sp),
-                                        minLines = 12,
-                                        maxLines = 20,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                    Button(
-                                        onClick = { onSaveWorkingFile(workspace.manifestFile, manifestDraft) },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Icon(Icons.Filled.Save, contentDescription = null)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Manifest'i Önbelleğe Kaydet")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
                 ToolkitModule.STRING_CREATOR -> {
                     item {
                         StringCreatorCard(

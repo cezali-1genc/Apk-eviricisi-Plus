@@ -31,13 +31,41 @@ object AxmlParser {
     private const val CHUNK_END_TAG = 0x0103
     private const val CHUNK_CDATA = 0x0104
 
-    private const val TYPE_STRING = 0x03
     private const val TYPE_REFERENCE = 0x01
+    private const val TYPE_ATTRIBUTE = 0x02
+    private const val TYPE_STRING = 0x03
+    private const val TYPE_FLOAT = 0x04
+    private const val TYPE_DIMENSION = 0x05
+    private const val TYPE_FRACTION = 0x06
     private const val TYPE_INT_DEC = 0x10
     private const val TYPE_INT_HEX = 0x11
     private const val TYPE_INT_BOOLEAN = 0x12
+    private const val TYPE_FIRST_COLOR_INT = 0x1c
+    private const val TYPE_LAST_COLOR_INT = 0x1f
+
+    private const val ANDROID_NS_URI = "http://schemas.android.com/apk/res/android"
+    private val DIMENSION_UNITS = arrayOf("px", "dp", "sp", "pt", "in", "mm")
+    private val FRACTION_UNITS = arrayOf("%", "%p")
+    private val RADIX_MULTS = floatArrayOf(0.00390625f, 3.051758E-5f, 1.192093E-7f, 4.656613E-10f)
+
+    /**
+     * Decodes a binary AndroidManifest.xml (or binary resource XML) buffer using AXMLPrinter2
+     * chunk decoding rules and returns the complete, untruncated UTF-8 XML document string.
+     */
+    fun decodeToXmlString(bytes: ByteArray): String {
+        return parseInternal(bytes).fullXml
+    }
 
     fun parseManifest(bytes: ByteArray): ManifestInfo {
+        return parseInternal(bytes).manifestInfo
+    }
+
+    private data class ParsedAxmlResult(
+        val manifestInfo: ManifestInfo,
+        val fullXml: String
+    )
+
+    private fun parseInternal(bytes: ByteArray): ParsedAxmlResult {
         if (bytes.size < 8) {
             throw IllegalArgumentException("AndroidManifest.xml ikili dosyası geçersiz veya boş.")
         }
@@ -129,20 +157,18 @@ object AxmlParser {
                         val valueData = reader.readInt32()
 
                         val attrNsUri = if (attrNsIdx >= 0) stringPool?.getOrNull(attrNsIdx) else null
-                        val attrPrefix = attrNsUri?.let { nsPrefixes[it] }
+                        val attrPrefix = attrNsUri?.let { uri ->
+                            nsPrefixes[uri] ?: if (uri == ANDROID_NS_URI) "android" else null
+                        }
                         val attrName = stringPool?.getOrNull(attrNameIdx) ?: "attr_$i"
                         val fullAttrName = if (!attrPrefix.isNullOrEmpty()) "$attrPrefix:$attrName" else attrName
 
-                        val attrValueStr = when (valueType) {
-                            TYPE_STRING -> stringPool?.getOrNull(valueData)
-                                ?: (if (rawValueIdx >= 0) stringPool?.getOrNull(rawValueIdx) else null)
-                                ?: ""
-                            TYPE_REFERENCE -> "@0x${valueData.toUInt().toString(16)}"
-                            TYPE_INT_DEC -> valueData.toString()
-                            TYPE_INT_HEX -> "0x${valueData.toUInt().toString(16)}"
-                            TYPE_INT_BOOLEAN -> (valueData != 0).toString()
-                            else -> if (rawValueIdx >= 0) stringPool?.getOrNull(rawValueIdx) ?: valueData.toString() else valueData.toString()
-                        }
+                        val attrValueStr = formatAttributeValue(
+                            valueType = valueType,
+                            valueData = valueData,
+                            rawValueIdx = rawValueIdx,
+                            stringPool = stringPool
+                        )
 
                         xmlBuilder.append("\n").append(indentStr).append("    ")
                             .append(fullAttrName).append("=\"").append(escapeXmlAttr(attrValueStr)).append("\"")
@@ -225,7 +251,8 @@ object AxmlParser {
             reader.position = chunkStart + chunkSize
         }
 
-        return ManifestInfo(
+        val fullXml = xmlBuilder.toString()
+        val info = ManifestInfo(
             packageName = packageName.ifBlank { "bilinmeyen.paket" },
             versionName = versionName.ifBlank { "1.0" },
             versionCode = versionCode,
@@ -235,7 +262,7 @@ object AxmlParser {
             appLabelResId = appLabelResId,
             supportsRtl = supportsRtl,
             usesPermissions = permissions.distinct(),
-            xmlPreview = xmlBuilder.toString().take(24_000),
+            xmlPreview = fullXml.take(24_000),
             activities = activities.distinct(),
             services = services.distinct(),
             receivers = receivers.distinct(),
@@ -244,6 +271,38 @@ object AxmlParser {
             isDebuggable = isDebuggable,
             allowBackup = allowBackup
         )
+        return ParsedAxmlResult(manifestInfo = info, fullXml = fullXml)
+    }
+
+    private fun formatAttributeValue(
+        valueType: Int,
+        valueData: Int,
+        rawValueIdx: Int,
+        stringPool: ResStringPool?
+    ): String = when {
+        valueType == TYPE_STRING -> stringPool?.getOrNull(valueData)
+            ?: (if (rawValueIdx >= 0) stringPool?.getOrNull(rawValueIdx) else null)
+            ?: ""
+        valueType == TYPE_REFERENCE -> "@0x${valueData.toUInt().toString(16)}"
+        valueType == TYPE_ATTRIBUTE -> "?0x${valueData.toUInt().toString(16)}"
+        valueType == TYPE_FLOAT -> java.lang.Float.intBitsToFloat(valueData).toString()
+        valueType == TYPE_DIMENSION -> {
+            val unit = DIMENSION_UNITS.getOrElse(valueData and 0x0F) { "px" }
+            "${complexToFloat(valueData)}$unit"
+        }
+        valueType == TYPE_FRACTION -> {
+            val unit = FRACTION_UNITS.getOrElse(valueData and 0x0F) { "%" }
+            "${complexToFloat(valueData) * 100f}$unit"
+        }
+        valueType == TYPE_INT_DEC -> valueData.toString()
+        valueType == TYPE_INT_HEX -> "0x${valueData.toUInt().toString(16)}"
+        valueType == TYPE_INT_BOOLEAN -> (valueData != 0).toString()
+        valueType in TYPE_FIRST_COLOR_INT..TYPE_LAST_COLOR_INT -> "#${valueData.toUInt().toString(16).padStart(8, '0')}"
+        else -> if (rawValueIdx >= 0) stringPool?.getOrNull(rawValueIdx) ?: valueData.toString() else valueData.toString()
+    }
+
+    private fun complexToFloat(complex: Int): Float {
+        return (complex and 0xFFFFFF00.toInt()) * RADIX_MULTS[(complex ushr 4) and 0x03]
     }
 
     private fun escapeXmlAttr(value: String): String {

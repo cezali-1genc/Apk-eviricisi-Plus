@@ -8,6 +8,16 @@ enum class ResourceKind(val tagName: String, val labelTr: String) {
     PLURALS("plurals", "Çoğul")
 }
 
+enum class ResourceCategory(val labelTr: String) {
+    GENERAL("Genel"),
+    MENU("Menü"),
+    ERROR("Hata"),
+    BUTTON("Buton"),
+    NOTIFICATION("Bildirim"),
+    SETTINGS("Ayarlar"),
+    SYSTEM("Sistem")
+}
+
 enum class TranslationOrigin(val labelTr: String) {
     PENDING("Bekliyor"),
     CACHE("Önbellek"),
@@ -95,6 +105,8 @@ data class ResourceEntryItem(
     val localeQualifier: String = "default",
     val originalText: String,
     val translatedText: String = "",
+    val previousTranslatedText: String = "",
+    val isLocked: Boolean = false,
     val protectedTokens: List<String> = emptyList(),
     val isTranslatable: Boolean = true,
     val origin: TranslationOrigin = TranslationOrigin.PENDING,

@@ -1,6 +1,8 @@
 package com.example.apktranslatorpro.ui.auth
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
@@ -42,12 +44,19 @@ sealed interface GoogleSignInOutcome {
 
 object GoogleSignInHelper {
 
+    private tailrec fun Context.unwrapActivityOrSelf(): Context = when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.unwrapActivityOrSelf()
+        else -> this
+    }
+
     suspend fun attemptSilentSignIn(activityContext: Context): Boolean {
+        val resolvedContext = activityContext.unwrapActivityOrSelf()
         return try {
-            val serverClientId = activityContext.getString(R.string.default_web_client_id)
+            val serverClientId = resolvedContext.getString(R.string.default_web_client_id)
             if (serverClientId.isBlank()) return false
 
-            val credentialManager = CredentialManager.create(activityContext)
+            val credentialManager = CredentialManager.create(resolvedContext)
             val googleIdOption = GetGoogleIdOption.Builder()
                 .setFilterByAuthorizedAccounts(true)
                 .setServerClientId(serverClientId)
@@ -60,7 +69,7 @@ object GoogleSignInHelper {
 
             val result = credentialManager.getCredential(
                 request = request,
-                context = activityContext
+                context = resolvedContext
             )
             val idToken = extractGoogleIdToken(result) ?: return false
             val authResult = FirebaseAuth.getInstance()
@@ -80,13 +89,14 @@ object GoogleSignInHelper {
     }
 
     suspend fun signInInteractive(activityContext: Context): GoogleSignInOutcome {
+        val resolvedContext = activityContext.unwrapActivityOrSelf()
         return try {
-            val serverClientId = activityContext.getString(R.string.default_web_client_id)
+            val serverClientId = resolvedContext.getString(R.string.default_web_client_id)
             if (serverClientId.isBlank()) {
                 return GoogleSignInOutcome.Failure("OAuth Web Client ID bulunamadı.")
             }
 
-            val credentialManager = CredentialManager.create(activityContext)
+            val credentialManager = CredentialManager.create(resolvedContext)
             val signInWithGoogleOption = GetSignInWithGoogleOption.Builder(serverClientId)
                 .build()
 
@@ -96,7 +106,7 @@ object GoogleSignInHelper {
 
             val result = credentialManager.getCredential(
                 request = request,
-                context = activityContext
+                context = resolvedContext
             )
 
             val idToken = extractGoogleIdToken(result)

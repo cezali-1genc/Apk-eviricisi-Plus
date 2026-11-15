@@ -63,13 +63,13 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun AuthScreen(
+    activityContext: android.content.Context = LocalContext.current,
     selectedAppLanguage: AppUiLanguage = AppUiLanguage.TR,
     guestTranslationsUsed: Int = 0,
     onSelectAppLanguage: (AppUiLanguage) -> Unit = {},
     onGuestTrialLoginClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -77,8 +77,8 @@ fun AuthScreen(
     val remainingTrial = (AppUserSettings.MAX_GUEST_TRIAL_TRANSLATIONS - guestTranslationsUsed).coerceAtLeast(0)
     val trialLimitReached = guestTranslationsUsed >= AppUserSettings.MAX_GUEST_TRIAL_TRANSLATIONS
 
-    LaunchedEffect(Unit) {
-        GoogleSignInHelper.attemptSilentSignIn(context)
+    LaunchedEffect(activityContext) {
+        GoogleSignInHelper.attemptSilentSignIn(activityContext)
     }
 
     Scaffold(
@@ -248,7 +248,7 @@ fun AuthScreen(
                                 scope.launch {
                                     isLoading = true
                                     errorMessage = null
-                                    when (val outcome = GoogleSignInHelper.signInInteractive(context)) {
+                                    when (val outcome = GoogleSignInHelper.signInInteractive(activityContext)) {
                                         is GoogleSignInOutcome.Success -> Unit
                                         GoogleSignInOutcome.Cancelled -> {
                                             isLoading = false

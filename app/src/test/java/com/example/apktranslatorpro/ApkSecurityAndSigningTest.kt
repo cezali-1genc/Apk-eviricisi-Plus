@@ -135,7 +135,7 @@ class ApkSecurityAndSigningTest {
         assertTrue(pass2Turkish.any { it.key == "options" && it.originalText == "Item B [TR2]" })
     }
 
-    private fun buildSyntheticApk(targetFile: File) {
+    internal fun buildSyntheticApk(targetFile: File) {
         val arscBytes = ArscAndApkExtractionTest.buildSyntheticArscTable().toByteArray()
         val manifestBytes = buildMinimalBinaryManifest("com.example.synthetic")
         val dummyDex = ByteArray(128) { 0x64 }

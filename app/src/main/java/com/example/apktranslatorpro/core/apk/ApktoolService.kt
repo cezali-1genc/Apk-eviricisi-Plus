@@ -15,6 +15,7 @@ import java.util.zip.ZipOutputStream
 
 data class DecompiledWorkspace(
     val workDir: File,
+    val originalsDir: File,
     val apkCopyFile: File,
     val sha256Hex: String,
     val manifestFile: File,
@@ -22,7 +23,8 @@ data class DecompiledWorkspace(
     val resXmlFiles: List<File>,
     val smaliFiles: List<File>,
     val dexSummaries: List<DexSummary>,
-    val allEntries: List<String>
+    val allEntries: List<String>,
+    val binaryManifestFile: File? = null
 )
 
 data class BulkKeyRenameResult(
@@ -110,9 +112,16 @@ class ApktoolService(
 
                 when {
                     safeName == "AndroidManifest.xml" -> {
+                        val rawManifestBytes = zip.getInputStream(entry).use { it.readBytes() }
+                        val axmlOutFile = File(decodedDir, "AndroidManifest.axml")
+                        axmlOutFile.parentFile?.mkdirs()
+                        axmlOutFile.writeBytes(rawManifestBytes)
+
                         val outFile = File(decodedDir, "AndroidManifest.xml")
                         outFile.parentFile?.mkdirs()
-                        outFile.writeText(analyzed.manifestInfo.xmlPreview, Charsets.UTF_8)
+                        val fullXml = runCatching { AxmlParser.decodeToXmlString(rawManifestBytes) }
+                            .getOrElse { analyzed.manifestInfo.xmlPreview }
+                        outFile.writeText(fullXml, Charsets.UTF_8)
                     }
                     safeName == "resources.arsc" -> {
                         val arscOut = File(decodedDir, "resources.arsc")
@@ -173,10 +182,32 @@ class ApktoolService(
             }
         }
 
+        val originalsDir = File(workDir, "originals").apply {
+            if (exists()) deleteRecursively()
+            mkdirs()
+        }
+        val manifestInDecoded = File(decodedDir, "AndroidManifest.xml")
+        if (manifestInDecoded.exists()) {
+            File(originalsDir, "AndroidManifest.xml").apply {
+                parentFile?.mkdirs()
+                writeText(manifestInDecoded.readText(Charsets.UTF_8), Charsets.UTF_8)
+            }
+        }
+        resXmlFiles.forEach { xmlFile ->
+            val rel = runCatching { xmlFile.relativeTo(decodedDir).path }.getOrNull()
+            if (!rel.isNullOrBlank() && xmlFile.exists()) {
+                File(originalsDir, rel).apply {
+                    parentFile?.mkdirs()
+                    writeText(xmlFile.readText(Charsets.UTF_8), Charsets.UTF_8)
+                }
+            }
+        }
+
         onProgress(1f, "Apktool çalışma alanı hazır (${resXmlFiles.size} XML, ${smaliFiles.size} Smali)")
 
         return DecompiledWorkspace(
             workDir = decodedDir,
+            originalsDir = originalsDir,
             apkCopyFile = apkFile,
             sha256Hex = sha256Hex,
             manifestFile = File(decodedDir, "AndroidManifest.xml"),
@@ -184,8 +215,21 @@ class ApktoolService(
             resXmlFiles = resXmlFiles.distinctBy { it.absolutePath }.sortedBy { it.relativeTo(decodedDir).path },
             smaliFiles = smaliFiles.sortedBy { it.name },
             dexSummaries = dexSummaries,
-            allEntries = allEntries.sorted()
+            allEntries = allEntries.sorted(),
+            binaryManifestFile = File(decodedDir, "AndroidManifest.axml").takeIf { it.exists() }
         )
+    }
+
+    fun readOriginalSnapshot(workspace: DecompiledWorkspace, workingFile: File): String {
+        val rel = runCatching { workingFile.relativeTo(workspace.workDir).path }.getOrNull() ?: return ""
+        val snapshot = File(workspace.originalsDir, rel)
+        return if (snapshot.exists() && snapshot.isFile) snapshot.readText(Charsets.UTF_8) else ""
+    }
+
+    fun compareWorkingFileWithOriginal(workspace: DecompiledWorkspace, workingFile: File): XmlDiffSummary {
+        val original = readOriginalSnapshot(workspace, workingFile)
+        val modified = readWorkingFile(workingFile)
+        return XmlDiffEngine.computeSideBySideDiff(original, modified)
     }
 
     fun readWorkingFile(file: File): String =

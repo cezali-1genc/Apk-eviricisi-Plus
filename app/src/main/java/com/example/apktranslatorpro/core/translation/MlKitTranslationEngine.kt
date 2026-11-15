@@ -16,10 +16,10 @@ import kotlinx.coroutines.tasks.await
 
 class MlKitTranslationEngine(private val context: Context) {
 
-    private val modelManager: RemoteModelManager by lazy {
-        runCatching { MlKitContext.initializeIfNeeded(context) }
+    private fun getModelManagerOrNull(): RemoteModelManager? = runCatching {
+        MlKitContext.initializeIfNeeded(context)
         RemoteModelManager.getInstance()
-    }
+    }.getOrNull()
 
     suspend fun detectLanguage(samples: List<String>): Pair<LanguageOption, Float> {
         val cleanSamples = samples
@@ -54,10 +54,12 @@ class MlKitTranslationEngine(private val context: Context) {
 
     suspend fun listOfflineModelStates(): List<OfflineModelState> {
         val downloadedCodes = try {
-            modelManager.getDownloadedModels(TranslateRemoteModel::class.java)
-                .await()
-                .map { it.language }
-                .toSet()
+            val manager = getModelManagerOrNull()
+            manager?.getDownloadedModels(TranslateRemoteModel::class.java)
+                ?.await()
+                ?.map { it.language }
+                ?.toSet()
+                ?: emptySet()
         } catch (_: Throwable) {
             emptySet()
         }
@@ -73,22 +75,26 @@ class MlKitTranslationEngine(private val context: Context) {
 
     suspend fun isModelDownloaded(language: LanguageOption): Boolean {
         val code = language.mlKitCode ?: return false
+        val manager = getModelManagerOrNull() ?: return false
         val model = TranslateRemoteModel.Builder(code).build()
-        return modelManager.isModelDownloaded(model).await()
+        return runCatching { manager.isModelDownloaded(model).await() }.getOrDefault(false)
     }
 
     suspend fun downloadModel(language: LanguageOption) {
         val code = language.mlKitCode
             ?: throw IllegalArgumentException("${language.displayNameTr} ML Kit çevrimdışı modelini desteklemiyor.")
+        val manager = getModelManagerOrNull()
+            ?: throw IllegalStateException("ML Kit model yöneticisi bu cihazda başlatılamadı.")
         val model = TranslateRemoteModel.Builder(code).build()
         val conditions = DownloadConditions.Builder().build()
-        modelManager.download(model, conditions).await()
+        manager.download(model, conditions).await()
     }
 
     suspend fun deleteModel(language: LanguageOption) {
         val code = language.mlKitCode ?: return
+        val manager = getModelManagerOrNull() ?: return
         val model = TranslateRemoteModel.Builder(code).build()
-        modelManager.deleteDownloadedModel(model).await()
+        manager.deleteDownloadedModel(model).await()
     }
 
     fun createTranslator(sourceLang: LanguageOption, targetLang: LanguageOption): Translator {

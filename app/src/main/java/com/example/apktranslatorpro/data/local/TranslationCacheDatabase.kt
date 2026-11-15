@@ -83,7 +83,8 @@ abstract class TranslationCacheDatabase : RoomDatabase() {
                     context.applicationContext,
                     TranslationCacheDatabase::class.java,
                     "apk_translator_pro_cache.db"
-                ).build().also { INSTANCE = it }
+                ).fallbackToDestructiveMigration(dropAllTables = true)
+                    .build().also { INSTANCE = it }
             }
         }
     }

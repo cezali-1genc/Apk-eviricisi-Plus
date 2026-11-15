@@ -58,7 +58,8 @@ abstract class RecentApkDatabase : RoomDatabase() {
                     context.applicationContext,
                     RecentApkDatabase::class.java,
                     "recent_apk_history.db"
-                ).build().also { INSTANCE = it }
+                ).fallbackToDestructiveMigration(dropAllTables = true)
+                    .build().also { INSTANCE = it }
             }
         }
     }

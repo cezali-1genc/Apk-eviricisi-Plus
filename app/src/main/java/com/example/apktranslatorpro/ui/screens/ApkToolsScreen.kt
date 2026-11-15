@@ -55,11 +55,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.apktranslatorpro.data.local.RecentApkEntity
+import com.example.apktranslatorpro.data.local.TranslationProjectEntity
+import com.example.apktranslatorpro.data.local.UserGlossaryEntity
 import com.example.apktranslatorpro.data.remote.ApkProjectRemote
 import com.example.apktranslatorpro.ui.viewmodel.BuildProcessUiState
 import com.example.apktranslatorpro.ui.viewmodel.CloudProjectsUiState
 import com.example.apktranslatorpro.ui.viewmodel.FilePickerUiState
 import com.example.apktranslatorpro.ui.viewmodel.GeminiAnalysisUiState
+import com.example.apktranslatorpro.ui.viewmodel.GitUiState
 import com.example.apktranslatorpro.ui.viewmodel.MainUiState
 import com.example.ui.theme.AppThemeMode
 import com.example.ui.theme.JetBrainsMonoFontFamily
@@ -74,10 +77,17 @@ fun ApkToolsScreen(
     uiState: MainUiState,
     filePickerState: FilePickerUiState,
     buildState: BuildProcessUiState,
+    gitState: GitUiState,
     recentApks: List<RecentApkEntity>,
+    savedProjects: List<TranslationProjectEntity>,
+    userGlossary: List<UserGlossaryEntity>,
+    userDisplayName: String,
     themeMode: AppThemeMode,
     cloudProjectsState: CloudProjectsUiState,
+    requestedModuleId: String? = null,
+    onConsumeRequestedModule: () -> Unit = {},
     onPickApkClick: () -> Unit,
+    onPickComparisonApkClick: () -> Unit,
     onVerifySafIntegrityClick: () -> Unit,
     onDecompileApkClick: () -> Unit,
     onRebuildApkClick: () -> Unit,
@@ -85,15 +95,45 @@ fun ApkToolsScreen(
     onBulkRenameKeys: (String, String, Boolean) -> Unit,
     onUpdateResourceTranslation: (String, String) -> Unit,
     onExportWorkspaceZip: (Uri) -> Unit,
+    onExportTextToUri: (Uri, String, String) -> Unit,
     onRegenerateSignerKey: () -> Unit,
     onDeleteRecentApk: (String) -> Unit,
     onClearRecentApks: () -> Unit,
     onRunGeminiAnalysisClick: () -> Unit,
     onDeleteCloudProject: (String) -> Unit,
     onOpenBinaryXmlTab: () -> Unit,
+    onSaveProjectClick: (String, String) -> Unit,
+    onLoadProjectClick: (String) -> Unit,
+    onDuplicateProjectClick: (String) -> Unit,
+    onDeleteProjectClick: (String) -> Unit,
+    onAddGlossaryTerm: (String, String) -> Unit,
+    onDeleteGlossaryTerm: (String) -> Unit,
+    onStartWorkManagerClick: () -> Unit,
+    onCancelWorkManagerClick: () -> Unit,
+    onGitUrlChanged: (String) -> Unit,
+    onGitBranchChanged: (String) -> Unit,
+    onGitPatChanged: (String) -> Unit,
+    onGitProbeRefs: () -> Unit,
+    onGitClone: () -> Unit,
+    onGitSelectRepo: (String) -> Unit,
+    onGitInspectDiff: (String) -> Unit,
+    onGitExportStrings: () -> Unit,
+    onGitCommit: (String, String) -> Unit,
+    onGitPushFile: (String, String) -> Unit,
+    onGitDeleteRepo: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var activeModule by remember { mutableStateOf<ToolkitModule?>(null) }
+    var activeModule by remember(requestedModuleId) {
+        mutableStateOf(
+            if (requestedModuleId != null) {
+                ToolkitModule.entries.firstOrNull { it.id == requestedModuleId }.also {
+                    onConsumeRequestedModule()
+                }
+            } else {
+                null
+            }
+        )
+    }
 
     when (val mod = activeModule) {
         ToolkitModule.XML_EDITOR, ToolkitModule.RESOURCE_EDITOR -> {
@@ -103,6 +143,89 @@ fun ApkToolsScreen(
                 onDecompileApkClick = onDecompileApkClick,
                 onSaveXmlFile = onSaveWorkingFile,
                 onBulkRenameKeys = onBulkRenameKeys,
+                onOpenXmlDiffComparison = { activeModule = ToolkitModule.XML_DIFF },
+                onBackClick = { activeModule = null },
+                modifier = modifier
+            )
+            return
+        }
+        ToolkitModule.XML_DIFF -> {
+            XmlDiffComparisonScreen(
+                workspace = buildState.workspace,
+                hasApkSelected = uiState.selectedApkUri != null,
+                isBusy = buildState.isBusy,
+                onDecompileApkClick = onDecompileApkClick,
+                onExportUnifiedPatch = { uri, content -> onExportTextToUri(uri, content, "XML Diff Yama") },
+                onOpenXmlEditor = { activeModule = ToolkitModule.XML_EDITOR },
+                onBackClick = { activeModule = null },
+                modifier = modifier
+            )
+            return
+        }
+        ToolkitModule.GIT_INTEGRATION -> {
+            GitIntegrationScreen(
+                gitState = gitState,
+                hasApkResources = uiState.resources.isNotEmpty(),
+                targetLangCode = uiState.targetLanguage.code,
+                userDisplayName = userDisplayName,
+                onUrlChanged = onGitUrlChanged,
+                onBranchChanged = onGitBranchChanged,
+                onPatChanged = onGitPatChanged,
+                onProbeRefsClick = onGitProbeRefs,
+                onCloneRepoClick = onGitClone,
+                onSelectRepoClick = onGitSelectRepo,
+                onInspectDiffClick = onGitInspectDiff,
+                onExportTranslatedStringsToRepo = onGitExportStrings,
+                onCommitChangesClick = onGitCommit,
+                onPushFileToGitHub = onGitPushFile,
+                onDeleteRepoClick = onGitDeleteRepo,
+                onBackClick = { activeModule = null },
+                modifier = modifier
+            )
+            return
+        }
+        ToolkitModule.APK_COMPARE -> {
+            ApkCompareScreen(
+                primaryApk = uiState.apkMetadata,
+                secondaryApk = uiState.comparisonApkMetadata,
+                isInspectingSecondary = uiState.isInspectingComparisonApk,
+                onPickSecondaryApkClick = onPickComparisonApkClick,
+                onBackClick = { activeModule = null },
+                modifier = modifier
+            )
+            return
+        }
+        ToolkitModule.PROJECT_MANAGER -> {
+            ProjectAndGlossaryScreen(
+                hasApkLoaded = uiState.apkMetadata != null,
+                defaultProjectName = uiState.apkMetadata?.let { "${it.appLabel} (${it.versionName})" } ?: "Yeni Proje",
+                projects = savedProjects,
+                glossary = userGlossary,
+                backgroundWorkStatus = uiState.backgroundWorkStatus,
+                isBackgroundWorkRunning = uiState.isBackgroundWorkRunning,
+                onSaveProjectClick = onSaveProjectClick,
+                onLoadProjectClick = onLoadProjectClick,
+                onDuplicateProjectClick = onDuplicateProjectClick,
+                onDeleteProjectClick = onDeleteProjectClick,
+                onAddGlossaryTerm = onAddGlossaryTerm,
+                onDeleteGlossaryTerm = onDeleteGlossaryTerm,
+                onStartWorkManagerClick = onStartWorkManagerClick,
+                onCancelWorkManagerClick = onCancelWorkManagerClick,
+                onBackClick = { activeModule = null },
+                modifier = modifier
+            )
+            return
+        }
+        ToolkitModule.MANIFEST_EDITOR -> {
+            ManifestEditorScreen(
+                workspace = buildState.workspace,
+                hasApkSelected = uiState.selectedApkUri != null,
+                isBusy = buildState.isBusy,
+                onDecompileApkClick = onDecompileApkClick,
+                onSaveManifestToWorkspace = onSaveWorkingFile,
+                onExportManifestToUri = { uri, content ->
+                    onExportTextToUri(uri, content, "AndroidManifest.xml")
+                },
                 onBackClick = { activeModule = null },
                 modifier = modifier
             )
@@ -114,7 +237,6 @@ fun ApkToolsScreen(
         ToolkitModule.SMALI_EDITOR,
         ToolkitModule.DEX_EDITOR,
         ToolkitModule.JAVA_VIEWER,
-        ToolkitModule.MANIFEST_EDITOR,
         ToolkitModule.STRING_CREATOR,
         ToolkitModule.PATCH_CREATOR -> {
             ToolkitCodeEditorModuleScreen(
@@ -607,9 +729,9 @@ private fun ToolkitDashboardGridCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("APK Araç Kutusu — 20 Modül", style = MaterialTheme.typography.titleLarge)
+            Text("APK Araç Kutusu — ${ToolkitModule.entries.size} Modül", style = MaterialTheme.typography.titleLarge)
             Text(
-                text = "Decompile, Smali renklendirici, XML düzenleme, toplu anahtar değiştirme ve geliştirici yardımcı araçları:",
+                text = "Decompile, Yan Yana XML Diff, Git & Git Clone, Smali renklendirici, Proje/Sözlük, APK Karşılaştırma ve WorkManager araçları:",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
