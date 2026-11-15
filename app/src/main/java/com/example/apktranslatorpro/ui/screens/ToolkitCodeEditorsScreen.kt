@@ -143,14 +143,14 @@ fun ToolkitCodeEditorModuleScreen(
                 }
             }
 
-            if (!statusNote.isNullOrBlank()) {
+            statusNote?.takeIf { it.isNotBlank() }?.let { note ->
                 item {
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer,
                         shape = MaterialTheme.shapes.small,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(statusNote!!, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
+                        Text(note, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
                     }
                 }
             }
@@ -464,9 +464,9 @@ private fun SmaliEditorCard(
                 }
             }
 
-            if (selectedFile != null) {
+            selectedFile?.let { fileToSave ->
                 Button(
-                    onClick = { onSaveSmali(selectedFile!!, codeText) },
+                    onClick = { onSaveSmali(fileToSave, codeText) },
                     modifier = Modifier.fillMaxWidth().testTag("save_smali_button")
                 ) {
                     Icon(Icons.Filled.Save, contentDescription = null)

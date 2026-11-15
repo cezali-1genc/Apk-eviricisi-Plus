@@ -131,14 +131,14 @@ fun ToolkitUtilityModuleScreen(
                 }
             }
 
-            if (!statusMessage.isNullOrBlank()) {
+            statusMessage?.takeIf { it.isNotBlank() }?.let { msg ->
                 item {
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer,
                         shape = MaterialTheme.shapes.small,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(statusMessage!!, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
+                        Text(msg, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
                     }
                 }
             }
@@ -415,20 +415,26 @@ private fun NotificationMakerCard(onStatus: (String) -> Unit) {
     var body by remember { mutableStateOf("APK araç kutusu test bildirimi başarıyla tetiklendi.") }
 
     fun sendNotification() {
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channelId = "apk_toolkit_notifications"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(channelId, "Toolkit Bildirimleri", NotificationManager.IMPORTANCE_DEFAULT)
-            nm.createNotificationChannel(ch)
+        runCatching {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                ?: throw IllegalStateException("Bildirim servisi kullanılamıyor.")
+            val channelId = "apk_toolkit_notifications"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val ch = NotificationChannel(channelId, "Toolkit Bildirimleri", NotificationManager.IMPORTANCE_DEFAULT)
+                nm.createNotificationChannel(ch)
+            }
+            val notif = NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(R.drawable.ic_apk_notification)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setAutoCancel(true)
+                .build()
+            nm.notify(1042, notif)
+        }.onSuccess {
+            onStatus("Sistem bildirimi gönderildi.")
+        }.onFailure { err ->
+            onStatus("Bildirim gönderilemedi: ${err.message ?: "Bilinmeyen hata"}")
         }
-        val notif = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setAutoCancel(true)
-            .build()
-        nm.notify(1042, notif)
-        onStatus("Sistem bildirimi gönderildi.")
     }
 
     val permLauncher = rememberLauncherForActivityResult(
@@ -463,6 +469,6 @@ private fun NotificationMakerCard(onStatus: (String) -> Unit) {
 }
 
 private fun copyToClipboard(context: Context, label: String, text: String) {
-    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
     cm.setPrimaryClip(ClipData.newPlainText(label, text))
 }

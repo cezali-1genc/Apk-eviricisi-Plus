@@ -153,11 +153,12 @@ class ApkPackager {
         unsignedOutputApk.parentFile?.mkdirs()
         if (unsignedOutputApk.exists()) unsignedOutputApk.delete()
 
-        ZipFile(sourceApk).use { zip ->
-            val allEntries = zip.entries().toList()
-            val totalEntries = allEntries.size.coerceAtLeast(1)
+        try {
+            ZipFile(sourceApk).use { zip ->
+                val allEntries = zip.entries().toList()
+                val totalEntries = allEntries.size.coerceAtLeast(1)
 
-            FileOutputStream(unsignedOutputApk).use { fos ->
+                FileOutputStream(unsignedOutputApk).use { fos ->
                 val countingOut = CountingOutputStream(fos)
                 BufferedOutputStream(countingOut, BUFFER_SIZE).use { bos ->
                     ZipOutputStream(bos).use { zos ->
@@ -248,6 +249,10 @@ class ApkPackager {
                     }
                 }
             }
+            }
+        } catch (t: Throwable) {
+            runCatching { unsignedOutputApk.delete() }
+            throw t
         }
     }
 
@@ -290,8 +295,13 @@ class ApkPackager {
         zip.getInputStream(entry).use { input ->
             val out = ByteArrayOutputStream(entry.size.toInt().coerceIn(256, 4 * 1024 * 1024))
             val buf = ByteArray(BUFFER_SIZE)
+            var totalRead = 0L
             var r: Int
             while (input.read(buf).also { r = it } != -1) {
+                totalRead += r.toLong()
+                if (totalRead > SecurityGuards.MAX_SINGLE_ENTRY_BYTES) {
+                    throw SecurityException("ZIP girişi maksimum boyutu aşıyor: ${entry.name}")
+                }
                 out.write(buf, 0, r)
             }
             return out.toByteArray()

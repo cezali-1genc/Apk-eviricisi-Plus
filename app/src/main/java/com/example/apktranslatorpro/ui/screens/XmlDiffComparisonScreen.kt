@@ -90,10 +90,10 @@ fun XmlDiffComparisonScreen(
     var showOnlyChanges by remember { mutableStateOf(false) }
 
     val diffPair = remember(workspace, selectedFile) {
-        if (workspace == null || selectedFile == null) {
+        val file = selectedFile
+        if (workspace == null || file == null) {
             null
         } else {
-            val file = selectedFile!!
             val rel = runCatching { file.relativeTo(workspace.workDir).path.replace('\\', '/') }.getOrDefault(file.name)
             val origFile = File(workspace.originalsDir, rel)
             val origText = if (origFile.exists()) origFile.readText(Charsets.UTF_8) else ""

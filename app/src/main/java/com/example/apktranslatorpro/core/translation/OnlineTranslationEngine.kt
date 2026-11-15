@@ -8,12 +8,14 @@ import com.example.apktranslatorpro.domain.model.OnlineApiConfig
 import com.example.apktranslatorpro.domain.model.OnlineProviderPreset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -28,14 +30,18 @@ class OnlineTranslationEngine(
 ) {
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    fun isNetworkConnected(): Boolean {
+    fun isNetworkConnected(): Boolean = runCatching {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            ?: return false
-        val network = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(network) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-    }
+            ?: return@runCatching false
+        val network = cm.activeNetwork ?: return@runCatching false
+        val caps = cm.getNetworkCapabilities(network) ?: return@runCatching false
+        val hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        val hasTransport = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        hasInternet && (hasTransport || caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED))
+    }.getOrDefault(false)
 
     suspend fun testConnection(config: OnlineApiConfig): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
@@ -61,20 +67,23 @@ class OnlineTranslationEngine(
             throw IOException("Aktif internet bağlantısı yok.")
         }
         val endpoint = config.endpointUrl.trim()
-        if (endpoint.isEmpty() || endpoint.toHttpUrlOrNull() == null) {
-            throw IllegalArgumentException("Geçerli bir çeviri API adresi (URL) yapılandırılmadı.")
-        }
+        val parsedUrl = endpoint.toHttpUrlOrNull()
+            ?: throw IllegalArgumentException("Geçerli bir çeviri API adresi (URL) yapılandırılmadı.")
 
         when (config.preset) {
-            OnlineProviderPreset.LIBRE_TRANSLATE -> callLibreTranslate(endpoint, text, sourceLang, targetLang, config.apiKey)
-            OnlineProviderPreset.GOOGLE_CLOUD_V2 -> callGoogleCloudV2(endpoint, text, sourceLang, targetLang, config.apiKey)
-            OnlineProviderPreset.DEEPL -> callDeepL(endpoint, text, sourceLang, targetLang, config.apiKey)
-            OnlineProviderPreset.CUSTOM_JSON -> callCustomJson(endpoint, text, sourceLang, targetLang, config)
+            OnlineProviderPreset.LIBRE_TRANSLATE ->
+                callLibreTranslate(normalizeEndpointUrl(parsedUrl, "translate"), text, sourceLang, targetLang, config.apiKey)
+            OnlineProviderPreset.GOOGLE_CLOUD_V2 ->
+                callGoogleCloudV2(parsedUrl, text, sourceLang, targetLang, config.apiKey)
+            OnlineProviderPreset.DEEPL ->
+                callDeepL(normalizeEndpointUrl(parsedUrl, "v2/translate"), text, sourceLang, targetLang, config.apiKey)
+            OnlineProviderPreset.CUSTOM_JSON ->
+                callCustomJson(parsedUrl, text, sourceLang, targetLang, config)
         }
     }
 
     private fun callLibreTranslate(
-        endpoint: String,
+        url: HttpUrl,
         text: String,
         sourceLang: LanguageOption,
         targetLang: LanguageOption,
@@ -85,33 +94,35 @@ class OnlineTranslationEngine(
             put("source", if (sourceLang == LanguageOption.AUTO) "auto" else sourceLang.code)
             put("target", targetLang.code)
             put("format", "text")
-            if (apiKey.isNotBlank()) put("api_key", apiKey)
+            if (apiKey.isNotBlank()) put("api_key", apiKey.trim())
         }
         val req = Request.Builder()
-            .url(endpoint)
+            .url(url)
             .post(payload.toString().toRequestBody(jsonMediaType))
             .build()
         val bodyStr = executeRequest(req)
-        val json = JSONObject(bodyStr)
-        if (json.has("error")) {
-            throw IOException("LibreTranslate hatası: ${json.optString("error")}")
+        val json = parseJsonObject(bodyStr, "LibreTranslate")
+        val errorMsg = json.optString("error")
+        if (errorMsg.isNotBlank()) {
+            throw IOException("LibreTranslate hatası: $errorMsg")
         }
         return json.optString("translatedText").takeIf { it.isNotEmpty() }
             ?: throw IOException("LibreTranslate yanıtında 'translatedText' bulunamadı.")
     }
 
     private fun callGoogleCloudV2(
-        endpoint: String,
+        endpointUrl: HttpUrl,
         text: String,
         sourceLang: LanguageOption,
         targetLang: LanguageOption,
         apiKey: String
     ): String {
-        if (apiKey.isBlank()) {
+        val trimmedKey = apiKey.trim()
+        if (trimmedKey.isBlank()) {
             throw IllegalArgumentException("Google Cloud Translate v2 için API anahtarı gerekli.")
         }
-        val url = endpoint.toHttpUrlOrNull()!!.newBuilder()
-            .addQueryParameter("key", apiKey)
+        val url = endpointUrl.newBuilder()
+            .setQueryParameter("key", trimmedKey)
             .build()
 
         val payload = JSONObject().apply {
@@ -125,41 +136,60 @@ class OnlineTranslationEngine(
             .post(payload.toString().toRequestBody(jsonMediaType))
             .build()
         val bodyStr = executeRequest(req)
-        val json = JSONObject(bodyStr)
-        val translations = json.getJSONObject("data").getJSONArray("translations")
-        return translations.getJSONObject(0).getString("translatedText")
+        val json = parseJsonObject(bodyStr, "Google Cloud Translate v2")
+        val errorObj = json.optJSONObject("error")
+        if (errorObj != null) {
+            val message = errorObj.optString("message").ifBlank { errorObj.toString() }
+            throw IOException("Google Cloud Translate hatası: $message")
+        }
+        val translations = json.optJSONObject("data")?.optJSONArray("translations")
+        val translated = translations?.optJSONObject(0)?.optString("translatedText").orEmpty()
+        if (translated.isEmpty()) {
+            throw IOException("Google Cloud Translate yanıtında çeviri verisi bulunamadı.")
+        }
+        return translated
     }
 
     private fun callDeepL(
-        endpoint: String,
+        url: HttpUrl,
         text: String,
         sourceLang: LanguageOption,
         targetLang: LanguageOption,
         apiKey: String
     ): String {
-        if (apiKey.isBlank()) {
+        val trimmedKey = apiKey.trim()
+        if (trimmedKey.isBlank()) {
             throw IllegalArgumentException("DeepL API için yetkilendirme anahtarı gerekli.")
         }
         val payload = JSONObject().apply {
             put("text", JSONArray().put(text))
             if (sourceLang != LanguageOption.AUTO) {
-                put("source_lang", sourceLang.code.uppercase())
+                put("source_lang", mapDeepLSourceCode(sourceLang))
             }
-            put("target_lang", targetLang.code.uppercase())
+            put("target_lang", mapDeepLTargetCode(targetLang))
         }
         val req = Request.Builder()
-            .url(endpoint)
-            .addHeader("Authorization", "DeepL-Auth-Key $apiKey")
+            .url(url)
+            .addHeader("Authorization", "DeepL-Auth-Key $trimmedKey")
             .post(payload.toString().toRequestBody(jsonMediaType))
             .build()
         val bodyStr = executeRequest(req)
-        val json = JSONObject(bodyStr)
-        val translations = json.getJSONArray("translations")
-        return translations.getJSONObject(0).getString("text")
+        val json = parseJsonObject(bodyStr, "DeepL")
+        val message = json.optString("message")
+        val translations = json.optJSONArray("translations")
+        if (translations == null || translations.length() == 0) {
+            val detail = message.ifBlank { "Boş translations dizisi" }
+            throw IOException("DeepL yanıt hatası: $detail")
+        }
+        val translated = translations.optJSONObject(0)?.optString("text").orEmpty()
+        if (translated.isEmpty()) {
+            throw IOException("DeepL çeviri metni boş döndü.")
+        }
+        return translated
     }
 
     private fun callCustomJson(
-        endpoint: String,
+        url: HttpUrl,
         text: String,
         sourceLang: LanguageOption,
         targetLang: LanguageOption,
@@ -172,21 +202,26 @@ class OnlineTranslationEngine(
             put("target", targetLang.code)
         }
         val reqBuilder = Request.Builder()
-            .url(endpoint)
+            .url(url)
             .post(payload.toString().toRequestBody(jsonMediaType))
 
-        if (config.apiKey.isNotBlank()) {
-            val headerName = config.customHeaderName.ifBlank { "Authorization" }
-            val headerVal = if (headerName.equals("Authorization", true) && !config.apiKey.startsWith("Bearer ", true)) {
-                "Bearer ${config.apiKey}"
+        val trimmedKey = config.apiKey.trim()
+        if (trimmedKey.isNotBlank()) {
+            val headerName = config.customHeaderName.trim().ifBlank { "Authorization" }
+            val headerVal = if (headerName.equals("Authorization", true) && !trimmedKey.startsWith("Bearer ", true)) {
+                "Bearer $trimmedKey"
             } else {
-                config.apiKey
+                trimmedKey
             }
             reqBuilder.addHeader(headerName, headerVal)
         }
 
         val bodyStr = executeRequest(reqBuilder.build())
-        val json = JSONObject(bodyStr)
+        val json = parseJsonObject(bodyStr, "Özel API")
+        val errMsg = json.optString("error")
+        if (errMsg.isNotBlank()) {
+            throw IOException("Özel API hatası: $errMsg")
+        }
         return json.optString("translatedText")
             .ifEmpty { json.optString("translation") }
             .ifEmpty { json.optString("text") }
@@ -194,13 +229,62 @@ class OnlineTranslationEngine(
             .ifEmpty { throw IOException("Özel API yanıtında çeviri alanı bulunamadı.") }
     }
 
+    private fun parseJsonObject(bodyStr: String, providerName: String): JSONObject {
+        val trimmed = bodyStr.trim()
+        if (trimmed.isEmpty()) {
+            throw IOException("$providerName sunucusundan boş yanıt geldi.")
+        }
+        return try {
+            JSONObject(trimmed)
+        } catch (ex: JSONException) {
+            throw IOException("$providerName geçersiz JSON yanıtı döndürdü: ${trimmed.take(120)}", ex)
+        }
+    }
+
     private fun executeRequest(request: Request): String {
         client.newCall(request).execute().use { response ->
             val bodyStr = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                throw IOException("HTTP ${response.code}: ${bodyStr.take(240)}")
+                val parsedError = runCatching {
+                    val obj = JSONObject(bodyStr)
+                    obj.optString("message")
+                        .ifBlank { obj.optString("error") }
+                        .ifBlank { obj.optJSONObject("error")?.optString("message").orEmpty() }
+                }.getOrDefault("")
+                val detail = parsedError.ifBlank { bodyStr.take(240) }
+                throw IOException("HTTP ${response.code}: $detail")
             }
             return bodyStr
+        }
+    }
+
+    companion object {
+        internal fun normalizeEndpointUrl(url: HttpUrl, defaultPath: String): HttpUrl {
+            val cleanSegs = url.pathSegments.filter { it.isNotBlank() }
+            if (cleanSegs.isNotEmpty()) return url
+            return url.newBuilder()
+                .encodedPath("/${defaultPath.trimStart('/')}")
+                .build()
+        }
+
+        internal fun mapDeepLSourceCode(lang: LanguageOption): String = when (lang) {
+            LanguageOption.CHINESE_SIMPLIFIED, LanguageOption.CHINESE_TRADITIONAL -> "ZH"
+            LanguageOption.NORWEGIAN -> "NB"
+            LanguageOption.BRAZILIAN_PT -> "PT"
+            LanguageOption.LATIN_AMERICA_ES -> "ES"
+            LanguageOption.MALAY_BRUNEI -> "MS"
+            else -> lang.code.substringBefore('-').uppercase()
+        }
+
+        internal fun mapDeepLTargetCode(lang: LanguageOption): String = when (lang) {
+            LanguageOption.CHINESE_SIMPLIFIED -> "ZH-HANS"
+            LanguageOption.CHINESE_TRADITIONAL -> "ZH-HANT"
+            LanguageOption.NORWEGIAN -> "NB"
+            LanguageOption.BRAZILIAN_PT -> "PT-BR"
+            LanguageOption.PORTUGUESE -> "PT-PT"
+            LanguageOption.LATIN_AMERICA_ES -> "ES"
+            LanguageOption.MALAY_BRUNEI -> "MS"
+            else -> lang.code.uppercase()
         }
     }
 }

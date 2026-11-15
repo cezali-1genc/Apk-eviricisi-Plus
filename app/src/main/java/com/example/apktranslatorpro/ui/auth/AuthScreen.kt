@@ -226,7 +226,7 @@ fun AuthScreen(
                             }
                         }
 
-                        if (!errorMessage.isNullOrBlank()) {
+                        errorMessage?.takeIf { it.isNotBlank() }?.let { errMsg ->
                             Surface(
                                 color = MaterialTheme.colorScheme.errorContainer,
                                 shape = MaterialTheme.shapes.small,
@@ -235,7 +235,7 @@ fun AuthScreen(
                                     .testTag("auth_error_banner")
                             ) {
                                 Text(
-                                    text = errorMessage!!,
+                                    text = errMsg,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onErrorContainer,
                                     modifier = Modifier.padding(12.dp)

@@ -183,7 +183,7 @@ fun ManifestEditorScreen(
                 }
             }
 
-            if (!statusMessage.isNullOrBlank()) {
+            statusMessage?.takeIf { it.isNotBlank() }?.let { msg ->
                 item {
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer,
@@ -193,7 +193,7 @@ fun ManifestEditorScreen(
                             .testTag("manifest_status_banner")
                     ) {
                         Text(
-                            text = statusMessage!!,
+                            text = msg,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.padding(12.dp)
@@ -202,7 +202,8 @@ fun ManifestEditorScreen(
                 }
             }
 
-            if (workspace == null || manifestDoc == null) {
+            val doc = manifestDoc
+            if (workspace == null || doc == null) {
                 item {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -234,7 +235,6 @@ fun ManifestEditorScreen(
                     }
                 }
             } else {
-                val doc = manifestDoc!!
 
                 item {
                     Card(

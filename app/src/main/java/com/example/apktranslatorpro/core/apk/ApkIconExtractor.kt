@@ -2,11 +2,14 @@ package com.example.apktranslatorpro.core.apk
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.util.zip.ZipFile
 
 /**
@@ -14,6 +17,9 @@ import java.util.zip.ZipFile
  * [PackageManager.getPackageArchiveInfo] or by scanning `res/mipmap*` / `res/drawable*` raster assets.
  */
 object ApkIconExtractor {
+
+    private const val MAX_ICON_BYTES = 4 * 1024 * 1024
+    private const val MAX_ICON_DIMENSION_PX = 256
 
     fun extractAppIcon(context: Context, apkFile: File): ImageBitmap? {
         if (!apkFile.exists()) return null
@@ -32,7 +38,7 @@ object ApkIconExtractor {
             }
         }
 
-        // 2. Fallback: find highest-resolution launcher PNG/WEBP/JPG inside the APK ZIP
+        // 2. Fallback: find highest-resolution launcher PNG/WEBP/JPG inside the APK ZIP with OOM-safe downsampling
         return runCatching {
             ZipFile(apkFile).use { zip ->
                 val iconEntry = zip.entries().asSequence()
@@ -56,11 +62,56 @@ object ApkIconExtractor {
                     .firstOrNull()
 
                 iconEntry?.let { entry ->
+                    if (entry.size > MAX_ICON_BYTES) return@let null
                     zip.getInputStream(entry).use { stream ->
-                        BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                        val bytes = readBoundedBytes(stream, MAX_ICON_BYTES) ?: return@use null
+                        decodeSampledBitmap(bytes, MAX_ICON_DIMENSION_PX)?.asImageBitmap()
                     }
                 }
             }
         }.getOrNull()
+    }
+
+    internal fun decodeSampledBitmap(bytes: ByteArray, maxDimensionPx: Int = MAX_ICON_DIMENSION_PX): Bitmap? {
+        val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, boundsOpts)
+        if (boundsOpts.outWidth <= 0 || boundsOpts.outHeight <= 0) return null
+
+        val sampleSize = calculateInSampleSize(
+            width = boundsOpts.outWidth,
+            height = boundsOpts.outHeight,
+            reqWidth = maxDimensionPx,
+            reqHeight = maxDimensionPx
+        )
+        val decodeOpts = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts)
+    }
+
+    internal fun calculateInSampleSize(width: Int, height: Int, reqWidth: Int, reqHeight: Int): Int {
+        var inSampleSize = 1
+        if (height > reqHeight || width > reqWidth) {
+            val halfHeight = height / 2
+            val halfWidth = width / 2
+            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                inSampleSize *= 2
+            }
+        }
+        return inSampleSize.coerceAtLeast(1)
+    }
+
+    private fun readBoundedBytes(stream: InputStream, maxBytes: Int): ByteArray? {
+        val out = ByteArrayOutputStream()
+        val buf = ByteArray(8 * 1024)
+        var total = 0
+        var read: Int
+        while (stream.read(buf).also { read = it } != -1) {
+            total += read
+            if (total > maxBytes) return null
+            out.write(buf, 0, read)
+        }
+        return out.toByteArray()
     }
 }

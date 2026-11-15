@@ -196,7 +196,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun regenerateSignerKey() {
         viewModelScope.launch {
-            runCatching { signerEngine.regenerateSignerIdentity() }
+            runCatching {
+                withContext(Dispatchers.IO) { signerEngine.regenerateSignerIdentity() }
+            }
                 .onSuccess { identity ->
                     _uiState.update {
                         it.copy(

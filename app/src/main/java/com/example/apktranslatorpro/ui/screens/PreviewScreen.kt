@@ -128,8 +128,7 @@ fun PreviewScreen(
         )
     }
 
-    if (editingItem != null) {
-        val current = editingItem!!
+    editingItem?.let { current ->
         val suggestions = remember(current) { TranslationQualityTools.suggestAlternatives(current) }
         AlertDialog(
             onDismissRequest = { editingItem = null },

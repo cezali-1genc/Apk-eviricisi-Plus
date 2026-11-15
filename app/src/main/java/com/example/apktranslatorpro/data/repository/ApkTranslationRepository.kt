@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.example.apktranslatorpro.core.apk.ApkPackager
+import com.example.apktranslatorpro.core.apk.ApkRecoveryValidator
 import com.example.apktranslatorpro.core.apk.ApkToolkitInspector
 import com.example.apktranslatorpro.core.apk.ArscTable
 import com.example.apktranslatorpro.core.security.ApkIntegrityHelper
@@ -532,9 +533,19 @@ class ApkTranslationRepository(
 
         val freshAnalyzed = packager.analyzeApk(session.workingInputApk)
         val arscTable = freshAnalyzed.arscTable
+        val (safeTranslatedItems, recoveryReport) = ApkRecoveryValidator.validateAndAutoRecover(
+            items = translatedItems
+        )
+        if (recoveryReport.autoRecoveredCount > 0) {
+            onLog(
+                LogLevel.WARN,
+                PipelineStage.REBUILDING_RESOURCES,
+                "Otomatik kurtarma (Crash Guard): ${recoveryReport.autoRecoveredCount} riskli çeviri orijinaline geri alındı (${recoveryReport.repairedEntries.take(3).joinToString { it.key }})."
+            )
+        }
         val applied = arscTable.applyTranslationsForScopes(
             targetLanguage = targetLanguage,
-            translatedItems = translatedItems,
+            translatedItems = safeTranslatedItems,
             stringsOnly = scopeConfig.strictStringsOnly,
             translateDefaultStrings = scopeConfig.translateDefaultStrings,
             translateValuesTr = scopeConfig.translateValuesTr,
@@ -542,10 +553,14 @@ class ApkTranslationRepository(
             preferredSourceLocale = null
         )
         val rebuiltArscBytes = arscTable.toByteArray()
-        onLog(LogLevel.SUCCESS, PipelineStage.REBUILDING_RESOURCES, "resources.arsc derlendi ($applied string güncellendi, diğer tüm dosyalar aynen korundu, ${rebuiltArscBytes.size / 1024} KB).")
+        if (!ApkRecoveryValidator.verifyArscTableHeader(rebuiltArscBytes)) {
+            throw IllegalStateException("Derlenen resources.arsc bütünlük kontrolünü geçemedi (RES_TABLE_TYPE geçersiz).")
+        }
+        onLog(LogLevel.SUCCESS, PipelineStage.REBUILDING_RESOURCES, "resources.arsc derlendi ($applied string güncellendi, ARSC & format koruması ✓, ${rebuiltArscBytes.size / 1024} KB).")
 
         onStage(PipelineStage.PACKAGING_APK)
-        val workspaceDir = session.workingInputApk.parentFile!!
+        val workspaceDir = session.workingInputApk.parentFile
+            ?: File(context.cacheDir, "apk_workspace").apply { mkdirs() }
         val unsignedApk = File(workspaceDir, "rebuilt_unsigned.apk")
         packager.repackageApkWithUpdatedArsc(
             sourceApk = session.workingInputApk,
@@ -643,6 +658,7 @@ class ApkTranslationRepository(
 
         val warnings = mutableListOf<String>().apply {
             addAll(session.metadata.securityWarnings)
+            addAll(recoveryReport.warnings)
             addAll(verifyReport.warnings)
         }
 
