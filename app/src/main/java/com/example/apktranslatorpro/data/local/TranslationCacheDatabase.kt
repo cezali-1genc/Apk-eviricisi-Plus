@@ -37,6 +37,17 @@ data class JobHistoryEntity(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "translation_history")
+data class TranslationHistoryEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val originalApkName: String,
+    val targetLanguage: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val isSuccess: Boolean,
+    val packageName: String = "",
+    val details: String = ""
+)
+
 @Dao
 interface TranslationCacheDao {
     @Query("SELECT * FROM translation_cache WHERE cacheKey = :cacheKey LIMIT 1")
@@ -64,14 +75,31 @@ interface JobHistoryDao {
     suspend fun clearHistory()
 }
 
+@Dao
+interface TranslationHistoryDao {
+    @Query("SELECT * FROM translation_history ORDER BY timestamp DESC LIMIT 100")
+    fun observeTranslationHistory(): Flow<List<TranslationHistoryEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertHistory(entry: TranslationHistoryEntity)
+
+    @Query("DELETE FROM translation_history")
+    suspend fun clearTranslationHistory()
+}
+
 @Database(
-    entities = [TranslationCacheEntity::class, JobHistoryEntity::class],
-    version = 1,
+    entities = [
+        TranslationCacheEntity::class,
+        JobHistoryEntity::class,
+        TranslationHistoryEntity::class
+    ],
+    version = 2,
     exportSchema = false
 )
 abstract class TranslationCacheDatabase : RoomDatabase() {
     abstract fun translationCacheDao(): TranslationCacheDao
     abstract fun jobHistoryDao(): JobHistoryDao
+    abstract fun translationHistoryDao(): TranslationHistoryDao
 
     companion object {
         @Volatile

@@ -26,6 +26,7 @@ data class TranslationProjectEntity(
     val serializedResourcesJson: String,
     val entryCount: Int,
     val translatedCount: Int,
+    val isFavorite: Boolean = false,
     val updatedAtMillis: Long = System.currentTimeMillis()
 )
 
@@ -39,11 +40,14 @@ data class UserGlossaryEntity(
 
 @Dao
 interface ProjectDao {
-    @Query("SELECT * FROM translation_projects ORDER BY updatedAtMillis DESC")
+    @Query("SELECT * FROM translation_projects ORDER BY isFavorite DESC, updatedAtMillis DESC")
     fun observeProjects(): Flow<List<TranslationProjectEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertProject(project: TranslationProjectEntity)
+
+    @Query("UPDATE translation_projects SET isFavorite = :isFavorite, updatedAtMillis = :updatedAt WHERE projectId = :projectId")
+    suspend fun updateFavorite(projectId: String, isFavorite: Boolean, updatedAt: Long = System.currentTimeMillis())
 
     @Query("SELECT * FROM translation_projects WHERE projectId = :projectId LIMIT 1")
     suspend fun getProject(projectId: String): TranslationProjectEntity?
@@ -63,7 +67,7 @@ interface ProjectDao {
 
 @Database(
     entities = [TranslationProjectEntity::class, UserGlossaryEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class ProjectDatabase : RoomDatabase() {
@@ -91,6 +95,7 @@ class ProjectRepository(private val dao: ProjectDao) {
     val glossaryFlow: Flow<List<UserGlossaryEntity>> = dao.observeGlossary()
 
     suspend fun saveProject(project: TranslationProjectEntity) = dao.upsertProject(project)
+    suspend fun toggleFavorite(projectId: String, isFavorite: Boolean) = dao.updateFavorite(projectId, isFavorite)
     suspend fun getProject(id: String): TranslationProjectEntity? = dao.getProject(id)
     suspend fun deleteProject(id: String) = dao.deleteProject(id)
 

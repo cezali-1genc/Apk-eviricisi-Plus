@@ -53,6 +53,12 @@ enum class OnlineProviderPreset(
         requiresKey = true,
         descriptionTr = "Google Cloud Translation Basic v2 REST API"
     ),
+    MICROSOFT_TRANSLATOR(
+        displayName = "Microsoft Translator",
+        defaultUrl = "https://api.cognitive.microsofttranslator.com/translate?api-version=3.0",
+        requiresKey = true,
+        descriptionTr = "Azure Cognitive Services Microsoft Translator Text API v3"
+    ),
     DEEPL(
         displayName = "DeepL API",
         defaultUrl = "https://api-free.deepl.com/v2/translate",
@@ -175,6 +181,98 @@ data class OnlineApiConfig(
     val endpointUrl: String = OnlineProviderPreset.LIBRE_TRANSLATE.defaultUrl,
     val apiKey: String = "",
     val customHeaderName: String = "Authorization"
+)
+
+data class ProviderEndpointConfig(
+    val preset: OnlineProviderPreset,
+    val endpointUrl: String = preset.defaultUrl,
+    val apiKey: String = "",
+    val regionOrHeader: String = if (preset == OnlineProviderPreset.CUSTOM_JSON) "Authorization" else "",
+    val isEnabled: Boolean = preset == OnlineProviderPreset.LIBRE_TRANSLATE
+) {
+    fun toOnlineApiConfig(): OnlineApiConfig = OnlineApiConfig(
+        preset = preset,
+        endpointUrl = endpointUrl.ifBlank { preset.defaultUrl },
+        apiKey = apiKey,
+        customHeaderName = regionOrHeader.ifBlank {
+            if (preset == OnlineProviderPreset.CUSTOM_JSON) "Authorization" else ""
+        }
+    )
+
+    fun isConfigured(): Boolean {
+        val urlOk = endpointUrl.trim().isNotBlank() || preset.defaultUrl.isNotBlank()
+        val keyOk = !preset.requiresKey || apiKey.trim().isNotBlank()
+        return isEnabled && urlOk && keyOk
+    }
+}
+
+data class MultiProviderApiConfig(
+    val primaryPreset: OnlineProviderPreset = OnlineProviderPreset.LIBRE_TRANSLATE,
+    val autoFailoverEnabled: Boolean = true,
+    val providers: Map<OnlineProviderPreset, ProviderEndpointConfig> = defaultProviders()
+) {
+    fun resolveConfig(preset: OnlineProviderPreset): ProviderEndpointConfig =
+        providers[preset] ?: ProviderEndpointConfig(preset = preset)
+
+    fun primaryOnlineApiConfig(): OnlineApiConfig =
+        resolveConfig(primaryPreset).toOnlineApiConfig()
+
+    fun orderedFailoverCandidates(): List<ProviderEndpointConfig> {
+        val fallbackOrder = listOf(
+            OnlineProviderPreset.DEEPL,
+            OnlineProviderPreset.GOOGLE_CLOUD_V2,
+            OnlineProviderPreset.MICROSOFT_TRANSLATOR,
+            OnlineProviderPreset.LIBRE_TRANSLATE,
+            OnlineProviderPreset.CUSTOM_JSON
+        )
+        val ordered = mutableListOf<ProviderEndpointConfig>()
+        val primary = resolveConfig(primaryPreset)
+        if (primary.isEnabled) {
+            ordered.add(primary)
+        }
+        if (autoFailoverEnabled) {
+            for (preset in fallbackOrder) {
+                if (preset == primaryPreset) continue
+                val cfg = resolveConfig(preset)
+                if (cfg.isEnabled && cfg.isConfigured()) {
+                    ordered.add(cfg)
+                }
+            }
+        }
+        return ordered
+    }
+
+    companion object {
+        fun defaultProviders(): Map<OnlineProviderPreset, ProviderEndpointConfig> =
+            OnlineProviderPreset.entries.associateWith { preset ->
+                ProviderEndpointConfig(
+                    preset = preset,
+                    endpointUrl = preset.defaultUrl,
+                    apiKey = "",
+                    regionOrHeader = if (preset == OnlineProviderPreset.CUSTOM_JSON) "Authorization" else "",
+                    isEnabled = preset == OnlineProviderPreset.LIBRE_TRANSLATE
+                )
+            }
+    }
+}
+
+data class ProviderRuntimeStatus(
+    val preset: OnlineProviderPreset,
+    val isQuotaExceeded: Boolean = false,
+    val isTemporarilyDisabled: Boolean = false,
+    val lastHttpCode: Int? = null,
+    val lastErrorMessageTr: String = "",
+    val lastSuccessMillis: Long? = null,
+    val disabledUntilMillis: Long = 0L
+)
+
+data class BatchRunSummary(
+    val modeLabel: String,
+    val totalCount: Int,
+    val successCount: Int,
+    val failedCount: Int,
+    val generatedFiles: List<String> = emptyList(),
+    val failedItems: List<String> = emptyList()
 )
 
 data class LanguageResourceScopeConfig(

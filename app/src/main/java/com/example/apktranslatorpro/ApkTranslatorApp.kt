@@ -74,7 +74,8 @@ class ApkTranslatorApp : Application() {
             onlineEngine = onlineEngine,
             geminiEngine = geminiEngine,
             cacheDao = database.translationCacheDao(),
-            historyDao = database.jobHistoryDao()
+            historyDao = database.jobHistoryDao(),
+            translationHistoryDao = database.translationHistoryDao()
         )
     }
 }
