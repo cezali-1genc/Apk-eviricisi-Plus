@@ -13,14 +13,17 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.example.apktranslatorpro.ApkTranslatorApp
+import com.example.apktranslatorpro.core.apk.ApkProcessor
 import com.example.apktranslatorpro.domain.model.LanguageOption
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.io.File
 
 /**
- * Jetpack WorkManager worker that executes end-to-end APK inspection, translation,
- * resources.arsc rebuild, v1/v2/v3 signing, and SHA-256 verification cleanly in background.
+ * Jetpack WorkManager worker that executes end-to-end APK extraction via [ApkProcessor],
+ * translation with identifier & placeholder preservation, resources.arsc rebuild,
+ * v1/v2/v3 signing, and SHA-256 verification cleanly in background using Coroutines.
  */
 class BackgroundTranslationWorker(
     appContext: Context,
@@ -33,17 +36,28 @@ class BackgroundTranslationWorker(
         )
         val targetLangCode = inputData.getString(KEY_TARGET_LANG) ?: "tr"
         val app = applicationContext as? ApkTranslatorApp ?: return Result.failure()
+        val processor = ApkProcessor(app, signerEngine = app.signerEngine)
 
         return try {
             setProgress(workDataOf(KEY_PROGRESS to 0.1f, KEY_STATUS to "Arka plan: APK analiz ediliyor..."))
             val session = app.repository.inspectApkFromUri(Uri.parse(uriString)) { _, _, msg ->
-                setProgressAsync(workDataOf(KEY_PROGRESS to 0.25f, KEY_STATUS to msg))
+                setProgressAsync(workDataOf(KEY_PROGRESS to 0.22f, KEY_STATUS to msg))
             }
+
+            val extractDir = File(app.cacheDir, "worker_extract")
+            val extraction = processor.extractApkWithZipInputStream(
+                sourceApk = session.workingInputApk,
+                destinationDir = extractDir
+            ) { count, entry ->
+                setProgressAsync(workDataOf(KEY_PROGRESS to 0.34f, KEY_STATUS to "ZipInputStream: $count öğe ($entry)"))
+            }
+            extractDir.deleteRecursively()
+
             val settings = app.settingsDataStore.settingsFlow.first()
             val target = LanguageOption.fromCode(targetLangCode)
             val source = session.metadata.detectedSourceLanguage
 
-            setProgress(workDataOf(KEY_PROGRESS to 0.4f, KEY_STATUS to "Arka plan: Çeviri çalışıyor (${target.displayNameTr})..."))
+            setProgress(workDataOf(KEY_PROGRESS to 0.42f, KEY_STATUS to "Arka plan: ${extraction.resources.size} kaynak çevriliyor (${target.displayNameTr})..."))
             val translated = app.repository.translateResources(
                 items = session.resources,
                 sourceLanguage = source,
@@ -55,13 +69,13 @@ class BackgroundTranslationWorker(
                 appName = session.metadata.appLabel,
                 packageName = session.metadata.packageName,
                 onProgress = { done, total ->
-                    val frac = 0.4f + (done.toFloat() / total.coerceAtLeast(1).toFloat()) * 0.4f
+                    val frac = 0.42f + (done.toFloat() / total.coerceAtLeast(1).toFloat()) * 0.38f
                     setProgressAsync(workDataOf(KEY_PROGRESS to frac, KEY_STATUS to "Arka plan: $done / $total"))
                 },
                 onLog = { _, _, _ -> }
             )
 
-            setProgress(workDataOf(KEY_PROGRESS to 0.85f, KEY_STATUS to "Arka plan: APK paketleniyor & imzalanıyor..."))
+            setProgress(workDataOf(KEY_PROGRESS to 0.85f, KEY_STATUS to "Arka plan: APK paketleniyor & v1/v2/v3 imzalanıyor..."))
             val output = app.repository.rebuildSignAndVerifyApk(
                 session = session,
                 translatedItems = translated,

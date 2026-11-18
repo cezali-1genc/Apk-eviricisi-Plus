@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.example.apktranslatorpro.core.apk.ApkRecoveryValidator
 import com.example.apktranslatorpro.core.text.TranslationQualityTools
 import com.example.apktranslatorpro.domain.model.ResourceCategory
 import com.example.apktranslatorpro.domain.model.ResourceEntryItem
@@ -56,6 +57,12 @@ fun PreviewToolsPanel(
     onOpenSideBySideXmlDiff: () -> Unit
 ) {
     val report = remember(resources) { TranslationQualityTools.buildReport(resources) }
+    val trCharCount = remember(resources) {
+        resources.count { it.translatedText.isNotBlank() && ApkRecoveryValidator.containsTurkishCharacters(it.translatedText) }
+    }
+    val longWarnCount = remember(resources) {
+        resources.count { it.translatedText.isNotBlank() && ApkRecoveryValidator.isOverlyLongTranslation(it.originalText, it.translatedText) }
+    }
 
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -72,7 +79,7 @@ fun PreviewToolsPanel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Kalite Puanı: ${report.averageQualityScore}/100 • Eksik: ${report.missingCount} • Yinelenen: ${report.duplicateSourceCount} • Kilitli: ${report.lockedCount}",
+                    text = "Kalite Puanı: ${report.averageQualityScore}/100 • Eksik: ${report.missingCount} • Türkçe Karakter: $trCharCount • Uzun Uyarı: $longWarnCount • Kilitli: ${report.lockedCount}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
                 )

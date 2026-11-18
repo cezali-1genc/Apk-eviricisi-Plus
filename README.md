@@ -1,85 +1,43 @@
-# Apk Çeviricisi Plus
+# Apk Çeviricisi Plus Ultra
 
-**Geliştirici Kuruluş:** Cezalı 1Genç (Serhat Güner)  
-**Paket Kimliği (`applicationId`):** `com.aistudio.apktranslatorpro.cz1g`  
-**Minimum Android:** 8.0 (API 26) • **Hedef SDK:** 36 (Android 14 / 15 / 16 uyumlu)  
-**Mimari:** Kotlin + Jetpack Compose (Material 3) + MVVM + Repository + Room + DataStore + WorkManager
-
----
-
-## Öne Çıkan Özellikler
-
-1. **Güvenli APK Dosya Yönetimi (SAF) ve Çoklu Kuyruk**
-   - Tekli veya çoklu APK seçimi, toplu APK içe aktarma ve WorkManager arka plan işlem kuyruğu.
-   - Paket adı, uygulama adı, gerçek başlatıcı ikonu (`ApkIconExtractor`), minSdk/targetSdk, sürüm ve boyut analizi.
-   - `ApkSecurityUtils` / `ApkIntegrityHelper` ile işlem öncesi ve sonrası **SHA-256** doğrulama, orijinal APK koruma, ZIP bomb ve Zip Slip (path traversal) koruması.
-   - APK yedekleme, arşiv yöneticisi, Room tabanlı Son Kullanılan APK geçmişi ve iki APK arasında meta veri/izin/SHA karşılaştırma ekranı (`ApkCompareScreen`).
-
-2. **105+ Dil, Otomatik Algılama ve 3 Arayüz Dili**
-   - `LanguageOption` ile **105+ dil** desteği (Türkçe, İngilizce, Almanca, Fransızca, Arapça, Rusça, İspanyolca, İtalyanca, Japonca, Korece, Çince, Portekizce, Farsça, Azerice, Hollandaca, Lehçe, Ukraynaca ve 88+ ek dil; RTL bayrakları dahil).
-   - APK `resources.arsc` analizi ile kaynak dil otomatik tespiti ve manuel seçim.
-   - Uygulama arayüzünde **Türkçe (TR), English (EN), Deutsch (DE)** dil desteği + Dark/Light/Sistem temaları.
-
-3. **Çoklu Çeviri Motorları ve Akıllı Çeviri Araçları**
-   - **Çevrimdışı:** Google ML Kit On-Device Translation + Language Identification (dil paketi indirme, silme, güncelleme).
-   - **Çevrimiçi:** REST API (LibreTranslate, Google Cloud Translation v2, DeepL, Özel REST) + Firebase AI Logic (Gemini). Ağ kesildiğinde `Otomatik` modda çevrimdışı motora geçiş.
-   - **Akıllı Araçlar:** Yan yana önizleme düzenleyici, arama/değiştirme, satır kilitleme (`isLocked`), önceki çeviriye geri alma (`previousTranslatedText`), otomatik biçimlendirme/noktalama düzeltme, kalite puanlama, alternatif öneriler, özel kullanıcı sözlüğü ve JSON / XML / CSV dışa aktarma.
-
-4. **Apktool Önbellek, XML Editör, Yan Yana XML Diff ve Smali/DEX**
-   - `ApktoolService` ile APK doğrulama, `originals/` ve `decompiled/` çalışma dizini, `strings.xml` toplu anahtar yeniden adlandırma (layout referanslarıyla birlikte).
-   - **Yan Yana XML Karşılaştırma (`XmlDiffComparisonScreen`):** Orijinal ve düzenlenmiş XML dosyalarını LCS algoritmasıyla satır satır renkli diff olarak gösterir ve `.diff` yaması dışa aktarır.
-   - Renkli **Smali Bytecode Editörü**, DEX sınıf/metot inceleyici ve Java görünümü.
-
-5. **Telefon Bağlantısı ile Saf Kotlin Git & Git Clone Entegrasyonu**
-   - Harici `git` ikili dosyasına ihtiyaç duymadan Android cihaz üzerinden doğrudan HTTPS Git Smart HTTP `/info/refs?service=git-upload-pack` keşfi ve GitHub/GitLab/Gitea HTTPS klonlama.
-   - Çalışma dizini `git status`, `XmlDiffEngine` ile satır farkı görüntüleme, yerel commit oluşturma, APK `strings.xml` içe/dışa aktarma ve PAT (Personal Access Token) ile GitHub Contents API üzerinden push.
-
-6. **Gerçek APK Yeniden Oluşturma ve v1/v2/v3 İmzalama (`apksig`)**
-   - `resources.arsc` (`FLAG_OFFSET16`, `FLAG_SPARSE`, `FLAG_COMPACT`) ve Binary XML yeniden derleme; `resources.arsc` için `STORED` + 4-byte hizalama, `.so` için 4096-byte hizalama.
-   - RSA-2048 PKCS#12 anahtar üretimi, **v1 / v2 / v3** imza uygulama ve `ApkVerifier` sertifika doğrulama.
+**Geliştirici:** CEZALI GENÇ (SG) — Serhat Güner  
+**Platform:** Android (Kotlin • Jetpack Compose • Material 3 • Coroutines • WorkManager)  
+**Paket Kimliği:** `com.aistudio.apktranslatorpro.cz1g`
 
 ---
 
-## Kurulum ve Derleme (Android Studio & Gradle)
+## Özellikler
 
-### Gereksinimler
-- Android Studio Ladybug / Meerkat veya üzeri
-- JDK 17+ (Compile options Java 11)
-- Android SDK 36 (Minimum SDK 26)
+- **6 Sekmeli Ana Yapı (`Scaffold` + `BottomNavigationBar` / `NavigationRail`):**
+  - `Çalıştır`: SAF salt okunur APK seçimi, çoklu APK kuyruğu, otomatik kaynak dil tespiti, TR/EN/DE/FR/AR/100+ hedef dil, Gemini AI / Çevrimiçi REST (DeepL, LibreTranslate, Google v2) / Çevrimdışı ML Kit motorları, canlı log ve tek tıkla yükle/paylaş.
+  - `Araçlar`: `ApkEditorDashboard` (Linux & PRoot dağıtım yönetimi, terminal oturum durdurma, paket yöneticisi durumu, `PermissionFixer` ve telefon sahibi izin merkezi), Decompiler, Rebuilder, Yan Yana XML Diff, Smali & DEX inceleyici, Manifest Editörü, Git & Git Clone.
+  - `Önizleme`: Çeviri listesi, Türkçe karakter/uzun metin uyarı telemetrisi, kilit/geri alma, Bul & Değiştir, `strings.xml` ve İkili AXML canlı önizleme.
+  - `Kurallar`: Placeholder (`%s`, `%1$d`, `{0}`), XML/HTML etiketi ve teknik terim koruma kuralları.
+  - `Modeller`: Toplu çoklu dosya & çoklu dil kuyruğu (`LanguageManagerViewModel`), Room önbelleği, ML Kit çevrimdışı dil paketleri.
+  - `Ayarlar`: Deneme / Google hesabı yönetimi, TR/EN/DE arayüz dili, Karanlık/Açık Ultra tema, AES-256-GCM şifreli API ayarları, RSA-2048 v1/v2/v3 imza anahtarı, çalışma zamanı izin merkezi.
 
-### 1. Debug APK Oluşturma
+## Temel Mimari Bileşenler
+
+- **`ApkProcessor` (`core/apk/ApkProcessor.kt`)**: Coroutines (`Dispatchers.IO` / `Dispatchers.Default`) üzerinde `ZipInputStream` ile güvenli APK çıkarma, `resources.arsc` ve `AndroidManifest.xml` çözümleme, kaynak ID'lerini (`id`, `key`, `kind`, `subKey`, `localeQualifier`) koruyarak placeholder güvenli yerelleştirme, 4-byte hizalı paketleme ve `ApkSignerEngine` (`apksig` v1/v2/v3) hazırlığı.
+- **`BackgroundTranslationWorker` (`core/work/BackgroundTranslationWorker.kt`)**: Jetpack WorkManager (`CoroutineWorker`) ile kesintisiz arka plan çeviri, derleme ve imzalama.
+- **`ApkRecoveryValidator` (`core/apk/ApkRecoveryValidator.kt`)**: Format belirteci (`%s`, `%d`, `%1$s`) uyuşmazlığı veya bozuk HTML/XML etiketlerinden kaynaklı `IllegalFormatException` / `InflateException` çökmelerini tespit edip hatalı girdileri otomatik olarak orijinaline kurtarır ve `resources.arsc` başlığını doğrular.
+- **`PermissionFixer` (`core/environment/PermissionFixer.kt`)**: Dahili `filesDir/linux` altındaki ikili dosyalarda (özellikle `proot`, `bash`, `zsh` ve paket yöneticileri) özyinelemeli olarak `File.setExecutable(true)` doğrular ve `ProcessBuilder` ortam değişkenlerini (`HOME`, `PREFIX`, `TMPDIR`, `PROOT_TMP_DIR`, `PATH`, `LD_LIBRARY_PATH`, `SHELL`) uygulama içi yollara yönlendirir.
+- **`ApkEditorDashboard` (`ui/components/ApkEditorDashboard.kt`)**: Kurulu Linux dağıtımlarını geçiş anahtarlarıyla yöneten, aktif terminal oturumlarını canlı çıktı ve **Durdur** butonuyla kontrol eden, paket yöneticisi durumunu gösteren ve çalışma zamanı cihaz izinlerini (`POST_NOTIFICATIONS`, `REQUEST_INSTALL_PACKAGES`, `SAF` klasörü) Google Play politikalarına uygun biçimde isteyen kart tabanlı Compose paneli.
+
+## Derleme ve Kurulum
+
+### Gradle (Standart / Android Studio / AndroidIDE)
 ```bash
 gradle :app:assembleDebug
 ```
-Çıktı konumu: `app/build/outputs/apk/debug/app-debug.apk`
 
-### 2. Birim ve Robolectric Testlerini Çalıştırma
+### Termux Üzerinden Kurulum & Derleme
 ```bash
-gradle :app:testDebugUnitTest
+bash scripts/termux_setup_build.sh
 ```
-*(Firestore Emulator kuralları için: `firebase emulators:exec --only auth,firestore "gradle :app:testDebugUnitTest"`)*
 
-### 3. Release APK Oluşturma ve İmzalama
-1. Güvenli bir yükleme anahtarı (`my-upload-key.jks`) oluşturun:
-   ```bash
-   keytool -genkeypair -v -keystore my-upload-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
-   ```
-2. Ortam değişkenlerini ayarlayın (anahtar parolalarını kaynak koda veya `local.properties`'e yazmayın):
-   ```bash
-   export KEYSTORE_PATH=/yol/my-upload-key.jks
-   export STORE_PASSWORD="guclu_depo_sifresi"
-   export KEY_PASSWORD="guclu_anahtar_sifresi"
-   ```
-3. Release APK veya App Bundle (AAB) derleyin:
-   ```bash
-   gradle :app:assembleRelease
-   # veya Play Store paketi için:
-   gradle :app:bundleRelease
-   ```
-Çıktı konumu: `app/build/outputs/apk/release/app-release.apk`
-
----
-
-**CEZALI 1GENÇ © • SERHAT GÜNER • BAĞIMSIZ DİJİTAL TEKNOLOJİ OLUŞUMU**  
-*Teknolojiyi Keşfet. Yazılımı Geliştir. Dijital Dünyayı Yönet.*
-
+### NixOS / Nix Flake Ortamı
+```bash
+nix develop
+gradle :app:assembleDebug
+```

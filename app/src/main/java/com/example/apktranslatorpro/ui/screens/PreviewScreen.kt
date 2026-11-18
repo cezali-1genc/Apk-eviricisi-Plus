@@ -65,6 +65,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import com.example.apktranslatorpro.core.apk.ApkRecoveryValidator
 import com.example.apktranslatorpro.core.text.TranslationQualityTools
 import com.example.apktranslatorpro.domain.model.ResourceCategory
 import com.example.apktranslatorpro.domain.model.ResourceEntryItem
@@ -72,6 +73,7 @@ import com.example.apktranslatorpro.domain.model.ResourceKind
 import com.example.apktranslatorpro.domain.model.TranslationOrigin
 import com.example.apktranslatorpro.ui.viewmodel.MainUiState
 import com.example.ui.theme.JetBrainsMonoFontFamily
+import com.example.ui.theme.StatusWarning
 
 private enum class PreviewFilter(val labelTr: String) {
     ALL("Tümü"),
@@ -497,6 +499,13 @@ private fun ResourcePreviewCard(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                if (ApkRecoveryValidator.isOverlyLongTranslation(item.originalText, item.translatedText)) {
+                    Text(
+                        text = "Uyarı: Uzun çeviri (${item.translatedText.length} karakter) — buton/menü taşması kontrol edilmeli.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = StatusWarning
                     )
                 }
             }

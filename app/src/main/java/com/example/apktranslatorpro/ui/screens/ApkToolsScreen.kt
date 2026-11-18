@@ -1,6 +1,7 @@
 package com.example.apktranslatorpro.ui.screens
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -58,11 +59,15 @@ import com.example.apktranslatorpro.data.local.RecentApkEntity
 import com.example.apktranslatorpro.data.local.TranslationProjectEntity
 import com.example.apktranslatorpro.data.local.UserGlossaryEntity
 import com.example.apktranslatorpro.data.remote.ApkProjectRemote
+import com.example.apktranslatorpro.ui.components.ApkEditorDashboard
+import com.example.apktranslatorpro.ui.components.UltraGlassCard
+import com.example.apktranslatorpro.ui.components.UltraStatusPill
 import com.example.apktranslatorpro.ui.viewmodel.BuildProcessUiState
 import com.example.apktranslatorpro.ui.viewmodel.CloudProjectsUiState
 import com.example.apktranslatorpro.ui.viewmodel.FilePickerUiState
 import com.example.apktranslatorpro.ui.viewmodel.GeminiAnalysisUiState
 import com.example.apktranslatorpro.ui.viewmodel.GitUiState
+import com.example.apktranslatorpro.ui.viewmodel.LinuxEnvUiState
 import com.example.apktranslatorpro.ui.viewmodel.MainUiState
 import com.example.ui.theme.AppThemeMode
 import com.example.ui.theme.JetBrainsMonoFontFamily
@@ -121,6 +126,16 @@ fun ApkToolsScreen(
     onGitCommit: (String, String) -> Unit,
     onGitPushFile: (String, String) -> Unit,
     onGitDeleteRepo: (String) -> Unit,
+    linuxEnvState: LinuxEnvUiState = LinuxEnvUiState(),
+    hasSafOutputFolder: Boolean = false,
+    outputFolderLabel: String = "Uygulama içi güvenli depolama",
+    onToggleDistro: (String, Boolean) -> Unit = { _, _ -> },
+    onUpdateDistroConfig: (String, String, String) -> Unit = { _, _, _ -> },
+    onRunPermissionFixer: () -> Unit = {},
+    onStartTerminalSession: (String, String, com.example.apktranslatorpro.core.environment.LinuxDistributionConfig?) -> Unit = { _, _, _ -> },
+    onStopTerminalSession: (String) -> Unit = {},
+    onClearFinishedSessions: () -> Unit = {},
+    onRequestSafOutputFolder: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var activeModule by remember(requestedModuleId) {
@@ -278,6 +293,24 @@ fun ApkToolsScreen(
             )
             return
         }
+        ToolkitModule.LINUX_DASHBOARD -> {
+            BackHandler { activeModule = null }
+            ApkEditorDashboard(
+                envState = linuxEnvState,
+                hasSafOutputFolder = hasSafOutputFolder,
+                outputFolderLabel = outputFolderLabel,
+                onToggleDistro = onToggleDistro,
+                onUpdateDistroConfig = onUpdateDistroConfig,
+                onRunPermissionFixer = onRunPermissionFixer,
+                onStartTerminalSession = onStartTerminalSession,
+                onStopTerminalSession = onStopTerminalSession,
+                onClearFinishedSessions = onClearFinishedSessions,
+                onRequestSafOutputFolder = onRequestSafOutputFolder,
+                onBackClick = { activeModule = null },
+                modifier = modifier
+            )
+            return
+        }
         ToolkitModule.FULL_EDIT -> {
             activeModule = null
             onOpenBinaryXmlTab()
@@ -408,6 +441,46 @@ fun ApkToolsScreen(
                                     Text("MD5:     ${inspection.md5Hex}", fontFamily = JetBrainsMonoFontFamily, style = MaterialTheme.typography.labelSmall)
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            item {
+                UltraGlassCard(
+                    accentColor = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "APK Editor Ultra • Linux & Terminal Paneli",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            UltraStatusPill(
+                                text = linuxEnvState.serviceSnapshot.health.labelTr,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Text(
+                            text = "Kurulu Linux dağıtımları (${linuxEnvState.distributions.count { it.isEnabled }} aktif), terminal oturumları (${linuxEnvState.activeSessions.count { it.isRunning }}), PermissionFixer (+x) ve telefon izin merkezi:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Button(
+                            onClick = { activeModule = ToolkitModule.LINUX_DASHBOARD },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("open_apk_editor_dashboard_button")
+                        ) {
+                            Text("ApkEditor Panelini Aç (PRoot / Terminal / İzinler)")
                         }
                     }
                 }

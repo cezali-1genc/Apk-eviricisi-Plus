@@ -97,6 +97,7 @@ import com.example.apktranslatorpro.domain.model.OutputApkResult
 import com.example.apktranslatorpro.domain.model.PipelineStage
 import com.example.apktranslatorpro.domain.model.TranslationMode
 import com.example.apktranslatorpro.ui.components.ApkSafFilePickerComponent
+import com.example.apktranslatorpro.ui.components.UltraGlassCard
 import com.example.apktranslatorpro.ui.viewmodel.MainUiState
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.StatusError
@@ -288,28 +289,28 @@ private fun StudioHeroBanner() {
                         shape = RoundedCornerShape(50.dp)
                     ) {
                         Text(
-                            text = "CEZALI 1GENÇ • SERHAT GÜNER",
+                            text = "CEZALI GENÇ (SG) • SERHAT GÜNER",
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFF67E8F9),
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                         )
                     }
                     Surface(
-                        color = Color(0x3310B981),
+                        color = Color(0x33A855F7),
                         shape = RoundedCornerShape(50.dp)
                     ) {
                         Text(
-                            text = "ARSC • GEMINI AI • v3",
+                            text = "ULTRA • ARSC • GEMINI • v3",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF6EE7B7),
+                            color = Color(0xFFE9D5FF),
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                         )
                     }
                 }
                 Column {
                     Text(
-                        text = stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.headlineMedium,
+                        text = "${stringResource(R.string.app_name)} Ultra",
+                        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
                         color = Color.White
                     )
                     Text(
@@ -338,10 +339,8 @@ private fun ApkSelectorCard(
 ) {
     val metadata = uiState.apkMetadata
     val isInspecting = uiState.isInspecting
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = MaterialTheme.shapes.medium,
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    UltraGlassCard(
+        accentColor = MaterialTheme.colorScheme.primary,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -585,10 +584,8 @@ private fun LanguageAndEngineCard(
         )
     }
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = MaterialTheme.shapes.medium,
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    UltraGlassCard(
+        accentColor = MaterialTheme.colorScheme.secondary,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -856,10 +853,8 @@ private fun PipelineControlCard(
     onStartBackgroundWorkClick: () -> Unit,
     onCancelClick: () -> Unit
 ) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = MaterialTheme.shapes.medium,
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    UltraGlassCard(
+        accentColor = MaterialTheme.colorScheme.tertiary,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(

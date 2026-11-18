@@ -91,7 +91,7 @@ class LinuxEnvViewModel(
             _state.update {
                 it.copy(
                     distributions = updated,
-                    statusMessage = "${distroId} ${if (enabled) "etkinleştirildi" else "devre dışı bırakıldı"}."
+                    statusMessage = "$distroId ${if (enabled) "etkinleştirildi" else "devre dışı bırakıldı"}."
                 )
             }
         }
@@ -115,8 +115,7 @@ class LinuxEnvViewModel(
         distro: LinuxDistributionConfig? = null
     ) {
         runCatching {
-            lateinit var launchedInfo: TerminalSessionInfo
-            launchedInfo = envManager.launchShellCommand(
+            val launchedInfo = envManager.launchShellCommand(
                 title = title,
                 shellCommand = command,
                 preferredDistro = distro,

@@ -101,6 +101,7 @@ import com.example.apktranslatorpro.ui.viewmodel.CloudSyncViewModel
 import com.example.apktranslatorpro.ui.viewmodel.FilePickerViewModel
 import com.example.apktranslatorpro.ui.viewmodel.GitViewModel
 import com.example.apktranslatorpro.ui.viewmodel.LanguageManagerViewModel
+import com.example.apktranslatorpro.ui.viewmodel.LinuxEnvViewModel
 import com.example.apktranslatorpro.ui.viewmodel.MainViewModel
 import com.example.ui.theme.ApkTranslatorProTheme
 import com.google.firebase.FirebaseApp
@@ -243,12 +244,14 @@ fun AuthenticatedAppShell(
     val buildProcessViewModel: BuildProcessViewModel = viewModel(factory = BuildProcessViewModel.Factory)
     val languageManagerViewModel: LanguageManagerViewModel = viewModel(factory = LanguageManagerViewModel.Factory)
     val gitViewModel: GitViewModel = viewModel(factory = GitViewModel.Factory)
+    val linuxEnvViewModel: LinuxEnvViewModel = viewModel(factory = LinuxEnvViewModel.Factory)
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val filePickerState by filePickerViewModel.state.collectAsStateWithLifecycle()
     val buildState by buildProcessViewModel.state.collectAsStateWithLifecycle()
     val langManagerState by languageManagerViewModel.state.collectAsStateWithLifecycle()
     val gitState by gitViewModel.state.collectAsStateWithLifecycle()
+    val linuxEnvState by linuxEnvViewModel.state.collectAsStateWithLifecycle()
     val settings by viewModel.settingsState.collectAsStateWithLifecycle()
     val cacheCount by viewModel.cacheCountState.collectAsStateWithLifecycle()
     val recentJobs by viewModel.recentJobsState.collectAsStateWithLifecycle()
@@ -367,7 +370,8 @@ fun AuthenticatedAppShell(
         langManagerState.statusMessage,
         langManagerState.errorMessage,
         gitState.statusMessage,
-        gitState.errorMessage
+        gitState.errorMessage,
+        linuxEnvState.statusMessage
     ) {
         val msg = uiState.errorMessage
             ?: uiState.statusBannerMessage
@@ -377,6 +381,7 @@ fun AuthenticatedAppShell(
             ?: langManagerState.statusMessage
             ?: gitState.errorMessage
             ?: gitState.statusMessage
+            ?: linuxEnvState.statusMessage
             ?: cloudSyncMessage
         if (!msg.isNullOrBlank()) {
             snackbarHostState.showSnackbar(msg)
@@ -384,6 +389,7 @@ fun AuthenticatedAppShell(
             buildProcessViewModel.clearBanner()
             languageManagerViewModel.clearMessages()
             gitViewModel.clearMessages()
+            linuxEnvViewModel.clearBanner()
             cloudViewModel?.clearSyncMessage()
         }
     }
@@ -469,10 +475,19 @@ fun AuthenticatedAppShell(
                 Column {
                     TopAppBar(
                         title = {
-                            Text(
-                                text = stringResource(R.string.app_name),
-                                style = MaterialTheme.typography.titleLarge
-                            )
+                            Column {
+                                Text(
+                                    text = stringResource(R.string.app_name),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "APK Editor Ultra • CEZALI GENÇ (SG)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = MaterialTheme.colorScheme.background
@@ -664,7 +679,17 @@ fun AuthenticatedAppShell(
                             },
                             onGitCommit = gitViewModel::commitLocalChanges,
                             onGitPushFile = gitViewModel::pushFileToGitHub,
-                            onGitDeleteRepo = gitViewModel::deleteActiveRepo
+                            onGitDeleteRepo = gitViewModel::deleteActiveRepo,
+                            linuxEnvState = linuxEnvState,
+                            hasSafOutputFolder = !settings.outputTreeUri.isNullOrBlank(),
+                            outputFolderLabel = settings.outputTreeLabel,
+                            onToggleDistro = linuxEnvViewModel::toggleDistribution,
+                            onUpdateDistroConfig = linuxEnvViewModel::updateDistributionConfig,
+                            onRunPermissionFixer = linuxEnvViewModel::runPermissionFixerNow,
+                            onStartTerminalSession = linuxEnvViewModel::startDiagnosticShellSession,
+                            onStopTerminalSession = linuxEnvViewModel::stopSession,
+                            onClearFinishedSessions = linuxEnvViewModel::clearFinishedSessions,
+                            onRequestSafOutputFolder = { pickOutputFolderLauncher.launch(null) }
                         )
                     }
 
@@ -773,7 +798,14 @@ fun AuthenticatedAppShell(
                             onSelectTheme = viewModel::setThemeMode,
                             onSaveOnlineApiConfig = viewModel::saveOnlineApiConfig,
                             onTestOnlineApiConnection = viewModel::testOnlineApiConnection,
-                            onRegenerateSignerKey = viewModel::regenerateSignerKey
+                            onRegenerateSignerKey = viewModel::regenerateSignerKey,
+                            linuxEnvState = linuxEnvState,
+                            onRunPermissionFixer = linuxEnvViewModel::runPermissionFixerNow,
+                            onOpenLinuxDashboard = {
+                                requestedToolsModuleId = "linux_dashboard"
+                                navigateTo(ApkToolsRoute)
+                            },
+                            onRequestSafOutputFolder = { pickOutputFolderLauncher.launch(null) }
                         )
                     }
                 }

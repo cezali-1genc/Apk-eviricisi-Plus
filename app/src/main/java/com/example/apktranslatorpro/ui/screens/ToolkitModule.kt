@@ -62,5 +62,6 @@ enum class ToolkitModule(
     NOTIFICATION_MAKER("notification_maker", "Bildirim Üretici", "Sistem bildirimi", ToolkitCategory.UTILITIES, Icons.Filled.NotificationsActive),
     TOAST_MAKER("toast_maker", "Toast Üretici", "Anlık mesaj", ToolkitCategory.UTILITIES, Icons.Filled.Key),
     BASE64_TOOLS("base64_tools", "Base64 Araçları", "Kodla & çöz", ToolkitCategory.UTILITIES, Icons.Filled.Password),
-    HTML_ENCODER("html_encoder", "HTML Kodlayıcı", "Escape & Unescape", ToolkitCategory.UTILITIES, Icons.Filled.Html)
+    HTML_ENCODER("html_encoder", "HTML Kodlayıcı", "Escape & Unescape", ToolkitCategory.UTILITIES, Icons.Filled.Html),
+    LINUX_DASHBOARD("linux_dashboard", "Linux & PRoot", "Dağıtım & Terminal", ToolkitCategory.UTILITIES, Icons.Filled.Terminal)
 }

@@ -1,5 +1,13 @@
 package com.example.apktranslatorpro.ui.screens
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +29,7 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Visibility
@@ -48,16 +57,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.example.R
 import com.example.apktranslatorpro.data.local.AppUiLanguage
 import com.example.apktranslatorpro.data.local.AppUserSettings
 import com.example.apktranslatorpro.domain.model.OnlineApiConfig
 import com.example.apktranslatorpro.domain.model.OnlineProviderPreset
+import com.example.apktranslatorpro.ui.components.PhoneOwnerPermissionsCard
+import com.example.apktranslatorpro.ui.components.UltraGlassCard
+import com.example.apktranslatorpro.ui.viewmodel.LinuxEnvUiState
 import com.example.apktranslatorpro.ui.viewmodel.MainUiState
 import com.example.ui.theme.AppThemeMode
 
@@ -75,13 +89,39 @@ fun SettingsAndBrandScreen(
     onSaveOnlineApiConfig: (OnlineApiConfig) -> Unit,
     onTestOnlineApiConnection: (OnlineApiConfig) -> Unit,
     onRegenerateSignerKey: () -> Unit,
+    linuxEnvState: LinuxEnvUiState = LinuxEnvUiState(),
+    onRunPermissionFixer: () -> Unit = {},
+    onOpenLinuxDashboard: () -> Unit = {},
+    onRequestSafOutputFolder: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var selectedPreset by remember { mutableStateOf(settings.onlineApiConfig.preset) }
     var endpointUrl by remember { mutableStateOf(settings.onlineApiConfig.endpointUrl) }
     var apiKey by remember { mutableStateOf(settings.onlineApiConfig.apiKey) }
     var customHeader by remember { mutableStateOf(settings.onlineApiConfig.customHeaderName) }
     var showApiKey by remember { mutableStateOf(false) }
+
+    var notificationGranted by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+            } else {
+                true
+            }
+        )
+    }
+    val notificationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        notificationGranted = granted
+    }
+    val installPermissionGranted = remember(settings) {
+        runCatching { context.packageManager.canRequestPackageInstalls() }.getOrDefault(false)
+    }
 
     LaunchedEffect(settings.onlineApiConfig) {
         selectedPreset = settings.onlineApiConfig.preset
@@ -408,6 +448,76 @@ fun SettingsAndBrandScreen(
                             Icon(Icons.Filled.Refresh, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
                             Text("Yeni İmza Anahtarı Üret")
+                        }
+                    }
+                }
+            }
+
+            item {
+                PhoneOwnerPermissionsCard(
+                    notificationGranted = notificationGranted,
+                    installPermissionGranted = installPermissionGranted,
+                    hasSafOutputFolder = !settings.outputTreeUri.isNullOrBlank(),
+                    outputFolderLabel = settings.outputTreeLabel,
+                    onRequestNotificationPermission = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            notificationGranted = true
+                        }
+                    },
+                    onRequestInstallPermission = {
+                        runCatching {
+                            val intent = Intent(
+                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                Uri.parse("package:${context.packageName}")
+                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            context.startActivity(intent)
+                        }
+                    },
+                    onRequestSafOutputFolder = onRequestSafOutputFolder
+                )
+            }
+
+            item {
+                UltraGlassCard(
+                    accentColor = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Filled.Terminal, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                            Text("Terminal, Termux, Nix & AndroidIDE Ortamı", style = MaterialTheme.typography.titleLarge)
+                        }
+                        Text(
+                            text = linuxEnvState.serviceSnapshot.detailMessageTr,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Button(
+                                onClick = onRunPermissionFixer,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("İzinleri Onar (+x)")
+                            }
+                            OutlinedButton(
+                                onClick = onOpenLinuxDashboard,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_open_linux_dashboard_button")
+                            ) {
+                                Text("Linux Panelini Aç")
+                            }
                         }
                     }
                 }
